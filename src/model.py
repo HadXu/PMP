@@ -122,7 +122,7 @@ class Net(torch.nn.Module):
         )
 
         self.edge_embedding = nn.Sequential(
-            LinearBn(6, 256),
+            LinearBn(29, 256),
             nn.ReLU(inplace=True),
             LinearBn(256, 256),
             nn.ReLU(inplace=True),

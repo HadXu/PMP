@@ -118,9 +118,16 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
     donor = np.zeros((num_atom, 1), np.uint8)
     aromatic = np.zeros((num_atom, 1), np.uint8)
     hybridization = np.zeros((num_atom, len(HYBRIDIZATION)), np.uint8)
-    num_h = np.zeros((num_atom, 1), np.float32)
+    # num_h = np.zeros((num_atom, 1), np.float32)
     atomic = np.zeros((num_atom, 1), np.float32)
-
+    valence = np.zeros((num_atom, 6), np.uint8)
+    ring3 = np.zeros((num_atom, 1), np.uint8)
+    ring4 = np.zeros((num_atom, 1), np.uint8)
+    ring5 = np.zeros((num_atom, 1), np.uint8)
+    ring6 = np.zeros((num_atom, 1), np.uint8)
+    ring = np.zeros((num_atom, 1), np.uint8)
+    charge = np.zeros((num_atom, 1), np.float32)
+    num_h = np.zeros((num_atom, 4), np.uint8)
 
     for i in range(num_atom):
         atom = mol.GetAtomWithIdx(i)
@@ -130,6 +137,17 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
 
         num_h[i] = atom.GetTotalNumHs(includeNeighbors=True)
         atomic[i] = atom.GetAtomicNum()
+
+        valence[i] = atom.GetExplicitValence()
+        ring3[i] = int(atom.IsInRingSize(3))
+        ring4[i] = int(atom.IsInRingSize(4))
+        ring5[i] = int(atom.IsInRingSize(5))
+        ring6[i] = int(atom.IsInRingSize(6))
+        ring[i] = int(atom.IsInRing())
+
+        AllChem.ComputeGasteigerCharges(mol)
+        charge[i] = atom.GetProp('_GasteigerCharge')
+        num_h[i] = one_hot_encoding(atom.GetTotalNumHs(includeNeighbors=True), range(4))
 
     for t in range(0, len(feature)):
         if feature[t].GetFamily() == 'Donor':
@@ -188,7 +206,8 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
         name,
         Chem.MolToSmiles(mol),
         [a, xyz],
-        [acsf, symbol, acceptor, donor, aromatic, hybridization, num_h, atomic],
+        [acsf, symbol, acceptor, donor, aromatic, hybridization, num_h, atomic, valence, ring3, ring4, ring5, ring6,
+         ring, charge, ],
         [bond_type, distance, angle, ],
         edge_index,
         coupling,

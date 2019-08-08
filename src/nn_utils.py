@@ -16,7 +16,6 @@ import sys
 import os
 import numpy as np
 import torch
-from torch.nn import functional as F
 from tqdm import tqdm
 
 
@@ -89,7 +88,7 @@ def compute_kaggle_metric(predict, coupling_value, coupling_type, num_type=8):
         index = np.where(coupling_type == t)[0]
         if len(index) > 0:
             m = diff[index].mean()
-            log_m = np.log(m + 1e-2)
+            log_m = np.log(m + 1e-12)
             mae[t] = m
             log_mae[t] = log_m
         else:
