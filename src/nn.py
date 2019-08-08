@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, RandomSampler
 from model import Net
 from nn_utils import do_train, do_valid, time_to_str, Graph, Coupling, Logger, adjust_learning_rate
 import random
+from Nadam import Nadam
 from sklearn.model_selection import KFold
 from timeit import default_timer as timer
 from nn_data import PMPDataset, null_collate
@@ -63,16 +64,17 @@ def train_fold(fold):
 
         log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
 
-        train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=4,
+        train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=8,
                                   pin_memory=True,
                                   shuffle=True)
-        val_loader = DataLoader(PMPDataset(val_names), batch_size=bs, collate_fn=null_collate, num_workers=4,
+        val_loader = DataLoader(PMPDataset(val_names), batch_size=128, collate_fn=null_collate, num_workers=8,
                                 pin_memory=True,
                                 )
 
-        net = Net(node_dim=96, edge_dim=6).to(device)
+        net = Net().to(device)
 
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
+        # optimizer = Nadam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, )
         if 'fine' in name:
             # name: att-fine
             net.load_state_dict(

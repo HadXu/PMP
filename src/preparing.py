@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 -------------------------------------------------
-   File Name：     preparing
+   File Name锛�     preparing
    Description :
    Author :       haxu
-   date：          2019-06-18
+   date锛�          2019-06-18
 -------------------------------------------------
    Change Activity:
                    2019-06-18:
@@ -14,6 +14,10 @@ __author__ = 'haxu'
 
 import os
 import numpy as np
+from sklearn.model_selection import GroupKFold
+from rdkit.Chem import AllChem
+from xyz2mol import xyz2mol, read_xyz_file
+from pathlib import Path
 import pandas as pd
 import pickle
 import multiprocessing as mp
@@ -21,7 +25,9 @@ from sklearn import preprocessing
 from rdkit import Chem
 from utils import mol_from_axyz
 from rdkit import RDConfig
-from rdkit.Chem import ChemicalFeatures, AllChem
+from rdkit.Chem import ChemicalFeatures
+from dscribe.descriptors import ACSF
+from dscribe.core.system import System
 
 
 def one_hot_encoding(x, set):
@@ -62,23 +68,38 @@ BOND_TYPE = [
 ]
 
 HYBRIDIZATION = [
-    Chem.rdchem.HybridizationType.S,
     Chem.rdchem.HybridizationType.SP,
     Chem.rdchem.HybridizationType.SP2,
     Chem.rdchem.HybridizationType.SP3,
 ]
 
+# xiong
+atom2polar = {'H': 2.2, 'O': 3.44, 'C': 2.55, 'F': 3.98, 'N': 3.04}
+atomic_radius = {'H': 0.38, 'C': 0.77, 'N': 0.75, 'O': 0.73, 'F': 0.71}
+fudge_factor = 0.05
+atomic_radius = {k: v + fudge_factor for k, v in atomic_radius.items()}
+
+
+def gaussian_rbf(x, min_x, max_x, center_num):
+    center_point = np.linspace(min_x, max_x, center_num)
+    x_vec = np.exp(np.square(center_point - x))
+    return x_vec
+
+
+dist_min = 0.95860666
+dist_max = 12.040386
+
+ACSF_GENERATOR = ACSF(
+    species=['H', 'C', 'N', 'O', 'F'],
+    rcut=6.0,
+    g2_params=[[1, 1], [1, 2], [1, 3]],
+    g4_params=[[1, 1, 1], [1, 2, 1], [1, 1, -1], [1, 2, -1]],
+)
+
 
 def make_graph(name, gb_structure, gb_scalar_coupling):
     # ['id', 'molecule_name', 'atom_index_0', 'atom_index_1', 'type','scalar_coupling_constant']
-    df = gb_scalar_coupling.get_group(name)
-
-    coupling = Coupling(df['id'].values,
-                        df[['fc', 'sd', 'pso', 'dso']].values,
-                        df[['atom_index_0', 'atom_index_1']].values,
-                        np.array([COUPLING_TYPE.index(t) for t in df.type.values], np.int32),
-                        df['scalar_coupling_constant'].values,
-                        )
+    coupling_df = gb_scalar_coupling.get_group(name)
 
     # [molecule_name,atom_index,atom,x,y,z]
     df = gb_structure.get_group(name)
@@ -93,39 +114,22 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
 
     num_atom = mol.GetNumAtoms()
     symbol = np.zeros((num_atom, len(SYMBOL)), np.uint8)
-    hybridization = np.zeros((num_atom, len(HYBRIDIZATION)), np.uint8)
-    atomic = np.zeros((num_atom, 1), np.uint8)
-    valence = np.zeros((num_atom, 6), np.uint8)
-    aromatic = np.zeros((num_atom, 1), np.uint8)
-    ring3 = np.zeros((num_atom, 1), np.uint8)
-    ring4 = np.zeros((num_atom, 1), np.uint8)
-    ring5 = np.zeros((num_atom, 1), np.uint8)
-    ring6 = np.zeros((num_atom, 1), np.uint8)
-    ring = np.zeros((num_atom, 1), np.uint8)
-    charge = np.zeros((num_atom, 1), np.float32)
-    num_h = np.zeros((num_atom, 8), np.uint8)
-
     acceptor = np.zeros((num_atom, 1), np.uint8)
     donor = np.zeros((num_atom, 1), np.uint8)
-    chirality = np.zeros((num_atom, 3), np.uint8)
+    aromatic = np.zeros((num_atom, 1), np.uint8)
+    hybridization = np.zeros((num_atom, len(HYBRIDIZATION)), np.uint8)
+    num_h = np.zeros((num_atom, 1), np.float32)
+    atomic = np.zeros((num_atom, 1), np.float32)
+
 
     for i in range(num_atom):
         atom = mol.GetAtomWithIdx(i)
         symbol[i] = one_hot_encoding(atom.GetSymbol(), SYMBOL)
+        aromatic[i] = atom.GetIsAromatic()
         hybridization[i] = one_hot_encoding(atom.GetHybridization(), HYBRIDIZATION)
-        atomic[i] = atom.GetAtomicNum()
-        aromatic[i] = atom.GetIsAromatic()
-        valence[i] = one_hot_encoding(atom.GetExplicitValence(), range(6))
-        aromatic[i] = atom.GetIsAromatic()
 
-        ring3[i] = int(atom.IsInRingSize(3))
-        ring4[i] = int(atom.IsInRingSize(4))
-        ring5[i] = int(atom.IsInRingSize(5))
-        ring6[i] = int(atom.IsInRingSize(6))
-        ring[i] = int(atom.IsInRing())
-        AllChem.ComputeGasteigerCharges(mol)
-        charge[i] = atom.GetProp('_GasteigerCharge')
-        num_h[i] = one_hot_encoding(atom.GetTotalNumHs(includeNeighbors=True), range(8))
+        num_h[i] = atom.GetTotalNumHs(includeNeighbors=True)
+        atomic[i] = atom.GetAtomicNum()
 
     for t in range(0, len(feature)):
         if feature[t].GetFamily() == 'Donor':
@@ -136,6 +140,7 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
                 acceptor[i] = 1
 
     num_edge = num_atom * num_atom - num_atom
+
     edge_index = np.zeros((num_edge, 2), np.uint32)
     bond_type = np.zeros((num_edge, len(BOND_TYPE)), np.uint32)
     distance = np.zeros((num_edge, 1), np.float32)
@@ -158,13 +163,33 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
 
             ij += 1
 
+    atom = System(symbols=a, positions=xyz)
+    acsf = ACSF_GENERATOR.create(atom)
+
+    l = []
+    for item in coupling_df[['atom_index_0', 'atom_index_1']].values.tolist():
+        i = edge_index.tolist().index(item)
+        l.append(i)
+
+    l = np.array(l)
+
+    coupling_edge_index = np.concatenate([coupling_df[['atom_index_0', 'atom_index_1']].values, l.reshape(len(l), 1)],
+                                         axis=1)
+
+    coupling = Coupling(coupling_df['id'].values,
+                        coupling_df[['fc', 'sd', 'pso', 'dso']].values,
+                        # coupling_df[['atom_index_0', 'atom_index_1']].values,
+                        coupling_edge_index,
+                        np.array([COUPLING_TYPE.index(t) for t in coupling_df.type.values], np.int32),
+                        coupling_df['scalar_coupling_constant'].values,
+                        )
+
     graph = Graph(
         name,
         Chem.MolToSmiles(mol),
         [a, xyz],
-        [symbol, hybridization, atomic, valence,
-         aromatic, ring3, ring4, ring5, ring6, ring, charge, num_h, acceptor, donor],
-        [bond_type, distance, angle],
+        [acsf, symbol, acceptor, donor, aromatic, hybridization, num_h, atomic],
+        [bond_type, distance, angle, ],
         edge_index,
         coupling,
     )
@@ -197,23 +222,29 @@ if __name__ == '__main__':
 
     molecule_names = df_scalar_coupling.molecule_name.unique()
 
-    g = make_graph('dsgdb9nsd_052330', gb_structure, gb_scalar_coupling)
+    g = make_graph('dsgdb9nsd_000001', gb_structure, gb_scalar_coupling)
 
     print(g.node)
-    print(g.edge)
-    print(g.smiles)
 
-    # param = []
-    #
-    # for i, molecule_name in enumerate(molecule_names):
-    #     graph_file = f'../input/graph0805/{molecule_name}.pickle'
-    #     p = (i, molecule_name, gb_structure, gb_scalar_coupling, graph_file)
-    #     param.append(p)
-    #
-    # print('load done.')
-    #
-    # pool = mp.Pool(processes=3)
-    # _ = pool.map(do_one, param)
-    #
-    # pool.close()
-    # pool.join()
+    param = []
+
+
+    def do_one(p):
+        molecule_name, graph_file = p
+        g = make_graph(molecule_name, gb_structure, gb_scalar_coupling)
+        with open(graph_file, 'wb') as f:
+            pickle.dump(g, f)
+
+
+    for i, molecule_name in enumerate(molecule_names):
+        graph_file = f'../input/graph/{molecule_name}.pickle'
+        p = (molecule_name, graph_file)
+        param.append(p)
+
+    print('load done.')
+
+    pool = mp.Pool(processes=55)
+    _ = pool.map(do_one, param)
+
+    pool.close()
+    pool.join()

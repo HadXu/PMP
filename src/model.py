@@ -2,12 +2,10 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from nn_data import PMPDataset, null_collate
+from nn_data import PMPDataset, null_collate, Graph, Coupling
 from torch_geometric.utils import scatter_
 from torch_scatter import *
 import math
-import random
-from nn_utils import Graph, Coupling
 
 
 class LinearBn(nn.Module):
@@ -27,52 +25,44 @@ class LinearBn(nn.Module):
 
 
 class GraphConv(nn.Module):
-    def __init__(self, node_dim, edge_dim, hidden_dim=256):
+    def __init__(self, node_dim, num_step):
         super(GraphConv, self).__init__()
 
-        self.encoder = nn.Sequential(
-            # LinearBn(edge_dim, hidden_dim),
-            nn.Linear(edge_dim, hidden_dim),
-            nn.ReLU(inplace=True),
-            # LinearBn(hidden_dim, hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(inplace=True),
-            # LinearBn(hidden_dim, hidden_dim // 2),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(inplace=True),
-            # LinearBn(hidden_dim // 2, node_dim * node_dim),
-            nn.Linear(hidden_dim // 2, node_dim * node_dim),
-        )
-
-        # self.gru = nn.GRU(node_dim, node_dim, batch_first=False, bidirectional=False)
-        self.gru = nn.GRU(node_dim, node_dim // 2, batch_first=False, bidirectional=True)
+        self.gru = nn.GRU(node_dim, node_dim, batch_first=False, bidirectional=False)
+        self.edge_embedding = LinearBn(128, node_dim * node_dim)
         self.bias = nn.Parameter(torch.zeros(node_dim))
         self.bias.data.uniform_(-1.0 / math.sqrt(node_dim), 1.0 / math.sqrt(node_dim))
+        self.num_step = num_step
+        self.node_dim = node_dim
 
-    def forward(self, node, edge_index, edge, hidden):
+    def forward(self, node, edge_index, edge):
+        x = node
+        hidden = node.unsqueeze(0)
+        edge = self.edge_embedding(edge).view(-1, self.node_dim, self.node_dim)
         num_node, node_dim = node.shape  # 4,128
-        num_edge, edge_dim = edge.shape  # 12,6
-        edge_index = edge_index.t().contiguous()
+        nodes = []
+        for i in range(self.num_step):
+            nodes.append(node + x)
 
-        x_i = torch.index_select(node, 0, edge_index[0])
+            x_i = torch.index_select(node, 0, edge_index[0])
 
-        edge = self.encoder(edge).view(-1, node_dim, node_dim)
+            message = x_i.view(-1, 1, node_dim) @ edge  # 12,1,128
 
-        message = x_i.view(-1, 1, node_dim) @ edge  # 12,1,128
+            message = message.view(-1, node_dim)  # 12,128
 
-        message = message.view(-1, node_dim)  # 12,128
+            message = scatter_('mean', message, edge_index[1], dim_size=num_node)  # 4,128
 
-        message = scatter_('mean', message, edge_index[1], dim_size=num_node)  # 4,128
+            message = F.relu(message + self.bias)  # 4, 128
 
-        message = F.relu(message + self.bias)  # 4, 128
+            node = message  # 9, 128
 
-        update = message  # 9, 128
+            node, hidden = self.gru(node.view(1, -1, node_dim), hidden)  # (1,9,128)  (1,9,128)
 
-        update, hidden = self.gru(update.view(1, -1, node_dim), hidden)
+            node = node.view(-1, node_dim)
 
-        update = update.view(-1, node_dim)
-
-        return update, hidden
+        node = torch.stack(nodes)
+        node = torch.mean(node, dim=0)
+        return node
 
 
 class Set2Set(torch.nn.Module):
@@ -119,123 +109,65 @@ class Set2Set(torch.nn.Module):
 
 
 class Net(torch.nn.Module):
-    def __init__(self, node_dim=96, edge_dim=6, num_target=8):
-        super(Net, self).__init__()
-        self.num_propagate = 4
-        self.num_s2s = 4
-        self.hidden_dim = 128
-        self.edge_dim = edge_dim
 
-        self.preprocess = nn.Sequential(
-            LinearBn(node_dim, self.hidden_dim),
+    def __init__(self):
+        super(Net, self).__init__()
+        self.hidden_dim = 128
+
+        self.node_embedding = nn.Sequential(
+            LinearBn(96, self.hidden_dim),
             nn.ReLU(inplace=True),
-            # LinearBn(self.hidden_dim, self.hidden_dim),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
+            LinearBn(self.hidden_dim, self.hidden_dim),
             nn.ReLU(inplace=True),
         )
 
-        self.propagate = GraphConv(self.hidden_dim, self.edge_dim)
+        self.edge_embedding = nn.Sequential(
+            LinearBn(6, 256),
+            nn.ReLU(inplace=True),
+            LinearBn(256, 256),
+            nn.ReLU(inplace=True),
+            LinearBn(256, 128),
+            nn.Dropout(0.3),
+            nn.ReLU(inplace=True)
+        )
 
-        self.set2set = Set2Set(self.hidden_dim, processing_step=self.num_s2s)
+        self.encoder = GraphConv(self.hidden_dim, 4)
+
+        self.decoder = Set2Set(self.hidden_dim, processing_step=4)
 
         self.predict = nn.Sequential(
-            # LinearBn(5 * self.hidden_dim, 1024),
-            nn.Linear(5 * self.hidden_dim, 1024),
-            nn.ReLU(inplace=True),
-            # LinearBn(1024, 512),
-            nn.Linear(1024, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, num_target),
-        )
-
-    def forward(self, node, edge, edge_index, node_index, coupling_index):
-        num_node, node_dim = node.shape
-
-        node = self.preprocess(node)  # 9,128
-
-        x = node  # 9, 128
-
-        hidden = torch.zeros(2, x.size(0), 64)
-
-        nodes = []
-        for i in range(self.num_propagate):
-            nodes.append(node + x)
-            node, hidden = self.propagate(node, edge_index, edge, hidden)  # (9,128)
-
-        node = torch.stack(nodes)  #
-
-        node = torch.mean(node, dim=0)
-
-        pool = self.set2set(node, node_index)  # 2, 256
-
-        coupling_atom0_index, coupling_atom1_index, coupling_type_index, coupling_batch_index = torch.split(
-            coupling_index, 1, dim=1)
-
-        pool = torch.index_select(pool, dim=0, index=coupling_batch_index.view(-1))  # 16,256
-        node0 = torch.index_select(node, dim=0, index=coupling_atom0_index.view(-1))  # 16,128
-        node1 = torch.index_select(node, dim=0, index=coupling_atom1_index.view(-1))  # 16,128
-
-        att = node0 + node1 - node0 * node1
-
-        predict = self.predict(torch.cat([pool, node0, node1, att], -1))
-
-        predict = torch.gather(predict, 1, coupling_type_index).view(-1)  # 16
-
-        return predict
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-
-class TuningNet(torch.nn.Module):
-    def __init__(self, url=None):
-        super(TuningNet, self).__init__()
-        self.base = Net(node_dim=96, edge_dim=6, num_target=8)
-
-        if url:
-            self.base.load_state_dict(
-                torch.load(url, map_location=lambda storage, loc: storage))
-
-        # for param in self.base.parameters():
-        #     param.requires_grad = False
-
-        self.base.predict = nn.Sequential(
-            LinearBn(5 * self.base.hidden_dim, 1024),
+            LinearBn(6 * self.hidden_dim, 1024),
             nn.ReLU(inplace=True),
             LinearBn(1024, 512),
             nn.ReLU(inplace=True),
-            nn.Linear(512, 1),
+            nn.Linear(512, 8),
         )
 
     def forward(self, node, edge, edge_index, node_index, coupling_index):
-        num_node, node_dim = node.shape
+        edge_index = edge_index.t().contiguous()
 
-        node = self.base.preprocess(node)
+        # coupling_atom0_index, coupling_atom1_index, coupling_type_index, coupling_batch_index = \
+        #     torch.split(coupling_index, 1, dim=1)
 
-        x = node
+        coupling_atom0_index, coupling_atom1_index, coupling_type_index, coupling_batch_index, edge_coupling_index = \
+            torch.split(coupling_index, 1, dim=1)
 
-        hidden = node.unsqueeze(0)
-        nodes = []
-        for i in range(self.base.num_propagate):
-            nodes.append(node + x)
-            node, hidden = self.base.propagate(node, edge_index, edge, hidden)  # (9,128)
+        node = self.node_embedding(node)
+        edge = self.edge_embedding(edge)
 
-        node = torch.stack(nodes)
-        node = torch.mean(node, dim=0)
+        node = self.encoder(node, edge_index, edge)
 
-        pool = self.base.set2set(node, node_index)  # 2, 256
-
-        coupling_atom0_index, coupling_atom1_index, coupling_type_index, coupling_batch_index = torch.split(
-            coupling_index, 1, dim=1)
+        pool = self.decoder(node, node_index)  # 2, 256
 
         pool = torch.index_select(pool, dim=0, index=coupling_batch_index.view(-1))  # 16,256
         node0 = torch.index_select(node, dim=0, index=coupling_atom0_index.view(-1))  # 16,128
         node1 = torch.index_select(node, dim=0, index=coupling_atom1_index.view(-1))  # 16,128
+        edge = torch.index_select(edge, dim=0, index=edge_coupling_index.view(-1))
 
         att = node0 + node1 - node0 * node1
 
-        predict = self.base.predict(torch.cat([pool, node0, node1, att], -1))
-
+        # predict
+        predict = self.predict(torch.cat([pool, node0, node1, att, edge], -1))
         predict = torch.gather(predict, 1, coupling_type_index).view(-1)  # 16
 
         return predict
@@ -247,7 +179,7 @@ class TuningNet(torch.nn.Module):
 if __name__ == '__main__':
     names = ['dsgdb9nsd_000002', 'dsgdb9nsd_000001', 'dsgdb9nsd_000030', 'dsgdb9nsd_000038']
     train_loader = DataLoader(PMPDataset(names), batch_size=2, collate_fn=null_collate)
-    net = Net(node_dim=96, edge_dim=6, num_target=8)
+    net = Net()
 
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(train_loader):
         _ = net(node, edge, edge_index, node_index, coupling_index)
