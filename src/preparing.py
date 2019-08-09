@@ -36,23 +36,35 @@ def one_hot_encoding(x, set):
 
 
 class Coupling:
-    def __init__(self, id, contribution, index, type, value):
+    def __init__(self, id, contribution, index, type, value, contribute_and_value):
         self.id = id
         self.contribution = contribution
         self.index = index
         self.type = type
         self.value = value
+        self.contribute_and_value = contribute_and_value
 
 
 class Graph:
-    def __init__(self, molecule_name, smiles, axyz, node, edge, edge_index, coupling: Coupling):
+    def __init__(self, coupling: Coupling,
+                 molecule_name,
+                 smiles,
+                 axyz,
+                 node,
+                 edge,
+                 edge_index,
+                 mol_label,
+                 node_label):
+        self.coupling = coupling
         self.molecule_name = molecule_name
         self.smiles = smiles
         self.axyz = axyz
         self.node = node
         self.edge = edge
         self.edge_index = edge_index
-        self.coupling = coupling
+
+        self.node_label = node_label
+        self.mol_label = mol_label
 
     def __str__(self):
         return f'graph of {self.molecule_name} -- smiles:{self.smiles}'
@@ -97,15 +109,27 @@ ACSF_GENERATOR = ACSF(
 )
 
 
-def make_graph(name, gb_structure, gb_scalar_coupling):
+def make_graph(name, gb_structure, gb_scalar_coupling, gb_mol):
     # ['id', 'molecule_name', 'atom_index_0', 'atom_index_1', 'type','scalar_coupling_constant']
     coupling_df = gb_scalar_coupling.get_group(name)
 
-    # [molecule_name,atom_index,atom,x,y,z]
+    # [molecule_name,atom_index,atom,x,y,z,EN,rad,n_bonds,bond_lengths_mean, XX	YX	ZX	XY	YY	ZY	XZ	YZ	ZZ	mulliken_charge]
     df = gb_structure.get_group(name)
     df = df.sort_values(['atom_index'], ascending=True)
     a = df.atom.values.tolist()
     xyz = df[['x', 'y', 'z']].values
+
+    # new 0808
+    en_rad_n_bonds_length = df[['EN', 'rad', 'n_bonds', 'bond_lengths_mean']].values
+    node_label = df[['XX', 'YX', 'ZX', 'XY', 'YY', 'ZY', 'XZ', 'YZ', 'ZZ', 'mulliken_charge']].values.astype(np.float32)
+
+    if name in gb_mol.groups.keys():
+        mol = gb_mol.get_group(name)
+        mol_label = mol[['X', 'Y', 'Z', 'potential_energy']].values.astype(np.float32)
+    else:
+        mol_label = np.array([[0, 0, 0, 0]], dtype=np.float32)
+
+    # new0808
 
     mol = mol_from_axyz(a, xyz)
 
@@ -120,14 +144,15 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
     hybridization = np.zeros((num_atom, len(HYBRIDIZATION)), np.uint8)
     # num_h = np.zeros((num_atom, 1), np.float32)
     atomic = np.zeros((num_atom, 1), np.float32)
-    valence = np.zeros((num_atom, 6), np.uint8)
+
+    valence = np.zeros((num_atom, 1), np.uint8)
     ring3 = np.zeros((num_atom, 1), np.uint8)
     ring4 = np.zeros((num_atom, 1), np.uint8)
     ring5 = np.zeros((num_atom, 1), np.uint8)
     ring6 = np.zeros((num_atom, 1), np.uint8)
     ring = np.zeros((num_atom, 1), np.uint8)
     charge = np.zeros((num_atom, 1), np.float32)
-    num_h = np.zeros((num_atom, 4), np.uint8)
+    num_h = np.zeros((num_atom, 5), np.uint8)
 
     for i in range(num_atom):
         atom = mol.GetAtomWithIdx(i)
@@ -147,7 +172,7 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
 
         AllChem.ComputeGasteigerCharges(mol)
         charge[i] = atom.GetProp('_GasteigerCharge')
-        num_h[i] = one_hot_encoding(atom.GetTotalNumHs(includeNeighbors=True), range(4))
+        num_h[i] = one_hot_encoding(atom.GetTotalNumHs(includeNeighbors=True), range(5))
 
     for t in range(0, len(feature)):
         if feature[t].GetFamily() == 'Donor':
@@ -195,40 +220,65 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
                                          axis=1)
 
     coupling = Coupling(coupling_df['id'].values,
-                        coupling_df[['fc', 'sd', 'pso', 'dso']].values,
+                        coupling_df[['fc', 'sd', 'pso', 'dso']].values.astype(np.float32),
                         # coupling_df[['atom_index_0', 'atom_index_1']].values,
                         coupling_edge_index,
                         np.array([COUPLING_TYPE.index(t) for t in coupling_df.type.values], np.int32),
                         coupling_df['scalar_coupling_constant'].values,
+                        contribute_and_value=np.concatenate([coupling_df[['scalar_coupling_constant']].values,
+                                                             coupling_df[['fc', 'sd', 'pso', 'dso']].values],
+                                                            axis=1).astype(np.float32)
                         )
 
+    bins = np.arange(0.959, 12.05, 0.5)
+    bins = [np.histogram(x, bins)[0].argmax() for x in distance]
+    bins = np.array([one_hot_encoding(b, range(23)) for b in bins], dtype=np.uint)
+
     graph = Graph(
-        name,
-        Chem.MolToSmiles(mol),
-        [a, xyz],
-        [acsf, symbol, acceptor, donor, aromatic, hybridization, num_h, atomic, valence, ring3, ring4, ring5, ring6,
-         ring, charge, ],
-        [bond_type, distance, angle, ],
-        edge_index,
-        coupling,
+        coupling=coupling,
+        molecule_name=name,
+        smiles=Chem.MolToSmiles(mol),
+        axyz=[a, xyz],
+        node=[acsf, symbol, acceptor, donor, aromatic, hybridization, num_h, atomic, en_rad_n_bonds_length, valence,
+              ring3, ring4, ring5, ring6, ring, charge],
+
+        edge=[bond_type, distance, angle, bins],
+        edge_index=edge_index,
+
+        node_label=node_label,
+        mol_label=mol_label,
     )
 
     return graph
 
 
-def do_one(p):
-    i, molecule_name, gb_structure, gb_scalar_coupling, graph_file = p
-    g = make_graph(molecule_name, gb_structure, gb_scalar_coupling)
-
-    with open(graph_file, 'wb') as f:
-        pickle.dump(g, f)
-    return
+# def do_one(p):
+#     i, molecule_name, gb_structure, gb_scalar_coupling, graph_file = p
+#     g = make_graph(molecule_name, gb_structure, gb_scalar_coupling)
+#
+#     with open(graph_file, 'wb') as f:
+#         pickle.dump(g, f)
+#     return
 
 
 if __name__ == '__main__':
     df_structure = pd.read_csv('../input/champs-scalar-coupling/structures.csv')
     df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv')
     df_test = pd.read_csv('../input/champs-scalar-coupling/test.csv')
+
+    # 0808 new
+    # 原子
+    magnetic_shielding_tensors = pd.read_csv('../input/champs-scalar-coupling/magnetic_shielding_tensors.csv')
+    mulliken_charges = pd.read_csv('../input/champs-scalar-coupling/mulliken_charges.csv')
+    df_structure = pd.merge(df_structure, magnetic_shielding_tensors, how='left', on=['molecule_name', 'atom_index'])
+    df_structure = pd.merge(df_structure, mulliken_charges, how='left', on=['molecule_name', 'atom_index']).fillna(0)
+
+    # 分子
+    dipole_moments = pd.read_csv('../input/champs-scalar-coupling/dipole_moments.csv')
+    potential_energy = pd.read_csv('../input/champs-scalar-coupling/potential_energy.csv')
+    mol = pd.merge(dipole_moments, potential_energy, how='left', on=['molecule_name'])
+    # 0808 new
+
     df_test['scalar_coupling_constant'] = 0
     df_scalar_coupling = pd.concat([df_train, df_test])
     df_scalar_coupling_contribution = pd.read_csv('../input/champs-scalar-coupling/scalar_coupling_contributions.csv')
@@ -238,19 +288,22 @@ if __name__ == '__main__':
 
     gb_scalar_coupling = df_scalar_coupling.groupby('molecule_name')
     gb_structure = df_structure.groupby('molecule_name')
+    gb_mol = mol.groupby('molecule_name')
 
     molecule_names = df_scalar_coupling.molecule_name.unique()
 
-    g = make_graph('dsgdb9nsd_000001', gb_structure, gb_scalar_coupling)
+    g = make_graph('dsgdb9nsd_000001', gb_structure, gb_scalar_coupling, gb_mol)
 
     print(g.node)
+    print(g.mol_label)
+    print(g.node_label)
 
     param = []
 
 
     def do_one(p):
         molecule_name, graph_file = p
-        g = make_graph(molecule_name, gb_structure, gb_scalar_coupling)
+        g = make_graph(molecule_name, gb_structure, gb_scalar_coupling, gb_mol)
         with open(graph_file, 'wb') as f:
             pickle.dump(g, f)
 

@@ -65,6 +65,41 @@ class Graph:
         self.coupling = coupling
 
 
+# class Coupling:
+#     def __init__(self, id, contribution, index, type, value, contribute_and_value):
+#         self.id = id
+#         self.contribution = contribution
+#         self.index = index
+#         self.type = type
+#         self.value = value
+#         self.contribute_and_value = contribute_and_value
+#
+#
+# class Graph:
+#     def __init__(self, coupling: Coupling,
+#                  molecule_name,
+#                  smiles,
+#                  axyz,
+#                  node,
+#                  edge,
+#                  edge_index,
+#                  mol_label,
+#                  node_label):
+#         self.coupling = coupling
+#         self.molecule_name = molecule_name
+#         self.smiles = smiles
+#         self.axyz = axyz
+#         self.node = node
+#         self.edge = edge
+#         self.edge_index = edge_index
+#
+#         self.node_label = node_label
+#         self.mol_label = mol_label
+#
+#     def __str__(self):
+#         return f'graph of {self.molecule_name} -- smiles:{self.smiles}'
+
+
 def time_to_str(t, mode='min'):
     if mode == 'min':
         t = int(t) / 60

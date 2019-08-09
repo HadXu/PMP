@@ -56,6 +56,7 @@ def null_collate(batch):
         edge_belong_index.append([b] * (num_node * (num_node - 1)))
 
         num_coupling = len(graph.coupling.value)
+
         coupling_value.append(graph.coupling.value)
 
         coupling_atom_index.append(graph.coupling.index[:, :2] + offset)
@@ -96,12 +97,12 @@ def one_hot_encoding(x, set):
 
 class PMPDataset(Dataset):
     def __init__(self, names, type='1JHC', is_seven=False):
-        self.path = Path('../input/graph0808')
+        self.path = Path('../input/graph0808_new')
         if is_seven:
             self.path = Path('/opt/ml/disk/PMP/input/graph_old')
         self.names = names
         self.type = COUPLING_TYPE.index(type)
-        self.bins = np.arange(0.959, 12.05, 0.5)  # 23
+        # self.bins = np.arange(0.959, 12.05, 0.5)  # 23
 
     def __getitem__(self, x):
         # molecule_name, smiles, axyz(atom, xyz), node, edge, edge_index
@@ -115,9 +116,9 @@ class PMPDataset(Dataset):
 
         g.node += [g.axyz[1]]
 
-        bins = [np.histogram(x, self.bins)[0].argmax() for x in g.edge[1]]
-        bins = np.array([one_hot_encoding(b, range(23)) for b in bins])
-        g.edge += [bins]
+        # bins = [np.histogram(x, self.bins)[0].argmax() for x in g.edge[1]]
+        # bins = np.array([one_hot_encoding(b, range(23)) for b in bins])
+        # g.edge += [bins]
 
         g.node = np.concatenate(g.node, -1)
         g.edge = np.concatenate(g.edge, -1)
@@ -131,7 +132,7 @@ class PMPDataset(Dataset):
 if __name__ == '__main__':
     names = ['dsgdb9nsd_000001', 'dsgdb9nsd_000002', 'dsgdb9nsd_000030', 'dsgdb9nsd_000038']
 
-    train_loader = DataLoader(PMPDataset(names), batch_size=2, collate_fn=null_collate)
+    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(
             train_loader):
         print(node.size())

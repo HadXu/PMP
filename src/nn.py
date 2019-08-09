@@ -65,16 +65,16 @@ def train_fold(fold):
         log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
 
         train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=8,
-                                  pin_memory=True,
+                                  pin_memory=False,
                                   shuffle=True)
         val_loader = DataLoader(PMPDataset(val_names), batch_size=128, collate_fn=null_collate, num_workers=8,
-                                pin_memory=True,
+                                pin_memory=False,
                                 )
 
         net = Net().to(device)
 
-        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
-        # optimizer = Nadam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, )
+        # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
+        optimizer = Nadam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
         if 'fine' in name:
             # name: att-fine
             net.load_state_dict(

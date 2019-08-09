@@ -15,9 +15,9 @@ __author__ = 'haxu'
 import torch
 import pandas as pd
 from sklearn.model_selection import KFold
-from nn_utils import Graph, Coupling, compute_kaggle_metric, do_valid_type, do_valid
-from nn_data import PMPDataset, DataLoader, null_collate, PMPDatasetType
-from model import Net, TuningNet
+from nn_utils import Graph, Coupling, compute_kaggle_metric, do_valid
+from nn_data import PMPDataset, DataLoader, null_collate
+from model import Net
 from tqdm import tqdm
 import numpy as np
 import random
@@ -92,7 +92,7 @@ def submit_one_fold():
     test_names = df_test['molecule_name'].unique()
     net = Net().to(device)
     net.load_state_dict(
-        torch.load(f'../checkpoint/fold0_model_fine.pth', map_location=lambda storage, loc: storage))
+        torch.load(f'../checkpoint/fold0_model_0808_new.pth', map_location=lambda storage, loc: storage))
     id, predict, coupling_value = submit_fold(test_names, net)
     df = pd.DataFrame(list(zip(id, predict)), columns=['id', 'scalar_coupling_constant'])
     df.to_csv('submission_0.csv', index=False)
@@ -111,10 +111,10 @@ def get_cv_score():
             continue
         bs = 128
         net.load_state_dict(
-            torch.load(f'../checkpoint/fold{k}_model_730.pth', map_location=lambda storage, loc: storage))
+            torch.load(f'../checkpoint/fold0_model_0808_new.pth', map_location=lambda storage, loc: storage))
 
         loader = DataLoader(PMPDataset(names[val_idx]), batch_size=bs, collate_fn=null_collate, num_workers=4,
-                            pin_memory=False)
+                            pin_memory=True)
         _, log_mae, log_mae_mean = do_valid(net, loader, device)
         cv_score.append(log_mae_mean)
         print('{:^7.4f}, {:^7.4f}, {:^7.4f}, {:^7.4f},{:^7.4f},{:^7.4f},{:^7.4f},{:^7.4f}'.format(*log_mae))
@@ -134,79 +134,6 @@ norm = {
     '3JHN': [0.990730, 1.315393353533751],
 }
 
-
-def get_fold_type(fold, type):
-    df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
-    names = df_train['molecule_name'].unique()
-
-    kfold = KFold(n_splits=5, random_state=42)
-    net = TuningNet().to(device)
-    net.load_state_dict(
-        torch.load(f'../checkpoint/fold{fold}_model_{type}.pth', map_location=lambda storage, loc: storage))
-    print('load model done...')
-    net.eval()
-
-    test_id = []
-    test_predict = []
-    test_coupling_value = []
-
-    for k, (tr_idx, val_idx) in enumerate(kfold.split(names)):
-        if k != fold:
-            continue
-
-        loader = DataLoader(PMPDatasetType(names[val_idx], type), batch_size=128,
-                            collate_fn=null_collate,
-                            num_workers=4,
-                            pin_memory=False)
-
-        for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in tqdm(enumerate(loader)):
-            with torch.no_grad():
-                node = node.to(device)
-                edge = edge.to(device)
-                edge_index = edge_index.to(device)
-                node_index = node_index.to(device)
-                coupling_value = coupling_value.to(device)
-                coupling_index = coupling_index.to(device)
-                predict = net(node, edge, edge_index, node_index, coupling_index)
-
-                predict = predict * norm[type][1] + norm[type][0]
-
-                batch_size = len(infor)
-                test_id.extend(list(np.concatenate([infor[b][2] for b in range(batch_size)])))
-                test_predict.append(predict.data.cpu().numpy())
-                test_coupling_value.append(coupling_value.data.cpu().numpy())
-
-    predict = np.concatenate(test_predict)
-    coupling_value = np.concatenate(test_coupling_value)
-
-    return test_id, predict, coupling_value
-
-
-def get_log_mae(predict, label):
-    diff = np.fabs(predict - label)
-    m = diff.mean()
-    log_m = np.log(m + 1e-2)
-
-    return log_m
-
-
-def get_fold_score(fold=0):
-    types = ['1JHC', '1JHN']
-    p = []
-    t = []
-
-    for type in types:
-        ids, predict, label = get_fold_type(fold, type)
-        log_m = get_log_mae(predict, label)
-        print(f'fold: {fold} -- type:{type}: socre: {log_m}')
-        p.append(predict)
-        t.append(label)
-
-    p = np.concatenate(p)
-    t = np.concatenate(t)
-
-    print(f'fold: {fold}-- score:{get_log_mae(p, t)}')
-
-
 if __name__ == '__main__':
-    get_fold_score()
+    get_cv_score()
+    submit_one_fold()
