@@ -123,7 +123,7 @@ def compute_kaggle_metric(predict, coupling_value, coupling_type, num_type=8):
         index = np.where(coupling_type == t)[0]
         if len(index) > 0:
             m = diff[index].mean()
-            log_m = np.log(m + 1e-12)
+            log_m = np.log(m + 1e-2)
             mae[t] = m
             log_mae[t] = log_m
         else:

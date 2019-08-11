@@ -147,7 +147,7 @@ class Net(torch.nn.Module):
         self.hidden_dim = 128
 
         self.node_embedding = nn.Sequential(
-            LinearBn(111, self.hidden_dim),
+            LinearBn(96, self.hidden_dim),
             nn.ReLU(inplace=True),
             LinearBn(self.hidden_dim, self.hidden_dim),
             nn.ReLU(inplace=True),
@@ -165,9 +165,9 @@ class Net(torch.nn.Module):
 
         self.encoder = GraphConv(self.hidden_dim, 4)
 
-        # self.decoder = Set2Set(self.hidden_dim, processing_step=4)
+        self.decoder = Set2Set(self.hidden_dim, processing_step=4)
 
-        self.decoder = SAGPool(self.hidden_dim)
+        # self.decoder = SAGPool(self.hidden_dim)
 
         self.predict = nn.Sequential(
             LinearBn(6 * self.hidden_dim, 1024),
@@ -190,9 +190,9 @@ class Net(torch.nn.Module):
         edge = self.edge_embedding(edge)
 
         node = self.encoder(node, edge_index, edge)
-        pool = self.decoder(node, edge_index, edge, node_index)
+        # pool = self.decoder(node, edge_index, edge, node_index)
 
-        # pool = self.decoder(node, node_index)  # 2, 256
+        pool = self.decoder(node, node_index)  # 2, 256
 
         pool = torch.index_select(pool, dim=0, index=coupling_batch_index.view(-1))  # 16,256
         node0 = torch.index_select(node, dim=0, index=coupling_atom0_index.view(-1))  # 16,128
@@ -203,6 +203,9 @@ class Net(torch.nn.Module):
 
         # predict
         predict = self.predict(torch.cat([pool, node0, node1, att, edge], -1))
+
+        # predict = self.predict(torch.cat([pool, node0, node1, att], -1))
+
         predict = torch.gather(predict, 1, coupling_type_index).view(-1)  # 16
 
         return predict

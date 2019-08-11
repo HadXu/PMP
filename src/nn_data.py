@@ -19,6 +19,16 @@ import torch
 import numpy as np
 from nn_utils import Graph, Coupling
 
+from dscribe.descriptors import ACSF
+from dscribe.core.system import System
+
+ACSF_GENERATOR = ACSF(
+    species=['H', 'C', 'N', 'O', 'F'],
+    rcut=6.0,
+    g2_params=[[1, 1], [1, 2], [1, 3]],
+    g4_params=[[1, 1, 1], [1, 2, 1], [1, 1, -1], [1, 2, -1]],
+)
+
 
 def null_collate(batch):
     batch_size = len(batch)
@@ -45,6 +55,7 @@ def null_collate(batch):
 
         num_node = len(graph.node)
         node.append(graph.node)
+
         edge.append(graph.edge)
 
         graph.edge_index = graph.edge_index.astype(np.int64)
@@ -52,15 +63,14 @@ def null_collate(batch):
         edge_index.append(graph.edge_index + offset)
         node_index.append([b] * num_node)
 
-        # edge index
-        edge_belong_index.append([b] * (num_node * (num_node - 1)))
+        # # edge index
+        # edge_belong_index.append([b] * (num_node * (num_node - 1)))
 
         num_coupling = len(graph.coupling.value)
 
         coupling_value.append(graph.coupling.value)
 
         coupling_atom_index.append(graph.coupling.index[:, :2] + offset)
-        coupling_edge_index.append(graph.coupling.index[:, 2] + edge_offset)
 
         coupling_type_index.append(graph.coupling.type)
         coupling_batch_index.append([b] * num_coupling)
@@ -68,6 +78,14 @@ def null_collate(batch):
         infor.append((graph.molecule_name, graph.smiles, graph.coupling.id))
         offset += num_node
         edge_offset += (num_node - 1) * num_node
+
+    edge_index_tmp = np.concatenate(edge_index).astype(np.int64).tolist()
+    coupling_atom_index_tmp = np.concatenate(coupling_atom_index).tolist()
+
+    l = []
+    for item in coupling_atom_index_tmp:
+        i = edge_index_tmp.index(item)
+        l.append(i)
 
     node = torch.from_numpy(np.concatenate(node)).float()
     edge = torch.from_numpy(np.concatenate(edge)).float()
@@ -80,7 +98,7 @@ def null_collate(batch):
         np.concatenate(coupling_atom_index),
         np.concatenate(coupling_type_index).reshape(-1, 1),
         np.concatenate(coupling_batch_index).reshape(-1, 1),
-        np.concatenate(coupling_edge_index).reshape(-1, 1),
+        np.array(l).reshape(-1, 1),
     ], -1)
 
     coupling_index = torch.from_numpy(coupling_index).long()
@@ -97,7 +115,7 @@ def one_hot_encoding(x, set):
 
 class PMPDataset(Dataset):
     def __init__(self, names, type='1JHC', is_seven=False):
-        self.path = Path('../input/graph0808_new')
+        self.path = Path('../input/graph_old')
         if is_seven:
             self.path = Path('/opt/ml/disk/PMP/input/graph_old')
         self.names = names
@@ -114,11 +132,11 @@ class PMPDataset(Dataset):
         assert isinstance(g, Graph)
         assert (g.molecule_name == name)
 
-        g.node += [g.axyz[1]]
+        atom = System(symbols=g.axyz[0], positions=g.axyz[1])
 
-        # bins = [np.histogram(x, self.bins)[0].argmax() for x in g.edge[1]]
-        # bins = np.array([one_hot_encoding(b, range(23)) for b in bins])
-        # g.edge += [bins]
+        acsf = ACSF_GENERATOR.create(atom)
+        g.node += [acsf, g.axyz[1]]
+        # g.node += [g.axyz[1]]
 
         g.node = np.concatenate(g.node, -1)
         g.edge = np.concatenate(g.edge, -1)

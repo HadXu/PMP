@@ -22,7 +22,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 
-device = torch.device('cuda:5')
+device = torch.device('cuda:7')
 
 SEED = 42
 random.seed(SEED)
@@ -111,7 +111,7 @@ def get_cv_score():
             continue
         bs = 128
         net.load_state_dict(
-            torch.load(f'../checkpoint/fold0_model_0808_new.pth', map_location=lambda storage, loc: storage))
+            torch.load(f'../checkpoint/fold0_model_newf_dropout_edgebin.pth', map_location=lambda storage, loc: storage))
 
         loader = DataLoader(PMPDataset(names[val_idx]), batch_size=bs, collate_fn=null_collate, num_workers=4,
                             pin_memory=True)
@@ -136,4 +136,4 @@ norm = {
 
 if __name__ == '__main__':
     get_cv_score()
-    submit_one_fold()
+    # submit_one_fold()
