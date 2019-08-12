@@ -164,7 +164,10 @@ def do_valid(net, valid_loader, device):
         coupling_index = coupling_index.to(device)
 
         with torch.no_grad():
-            predict = net(node, edge, edge_index, node_index, coupling_index)
+            predict1 = net(node, edge, edge_index, node_index, coupling_index)
+            coupling_index[:, [0, 1]] = coupling_index[:, [1, 0]]
+            predict2 = net(node, edge, edge_index, node_index, coupling_index)
+            predict = (predict1 + predict2) / 2
             loss = criterion(predict, coupling_value)
 
         batch_size = len(infor)

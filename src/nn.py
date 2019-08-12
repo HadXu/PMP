@@ -8,8 +8,9 @@ import random
 from Nadam import Nadam
 from sklearn.model_selection import KFold
 from timeit import default_timer as timer
-from nn_data import PMPDataset, null_collate
+from nn_data import PMPDataset, null_collate, train_collect, valid_collect
 from argparse import ArgumentParser
+from torch.optim.lr_scheduler import MultiStepLR
 
 parser = ArgumentParser(description='train PMP')
 
@@ -64,10 +65,10 @@ def train_fold(fold):
 
         log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
 
-        train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=8,
+        train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=train_collect, num_workers=8,
                                   pin_memory=False,
                                   shuffle=True)
-        val_loader = DataLoader(PMPDataset(val_names), batch_size=128, collate_fn=null_collate, num_workers=8,
+        val_loader = DataLoader(PMPDataset(val_names), batch_size=128, collate_fn=valid_collect, num_workers=8,
                                 pin_memory=False,
                                 )
 
@@ -75,6 +76,8 @@ def train_fold(fold):
 
         # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
         optimizer = Nadam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
+        lr_schedule = MultiStepLR(optimizer=optimizer, milestones=(100, 130, 160), gamma=0.5)
+
         if 'fine' in name:
             # name: att-fine
             net.load_state_dict(
@@ -97,11 +100,12 @@ def train_fold(fold):
             timing = time_to_str((timer() - start), 'min')
             if log_mae_mean < best_score:
                 best_score = log_mae_mean
-                best_epoch = e
                 torch.save(net.state_dict(), f'../checkpoint/fold{k}_model_{name}.pth')
                 log.write(f_boost.format(e, train_loss, valid_loss, *log_mae, log_mae_mean, timing))
             else:
                 log.write(f_normal.format(e, train_loss, valid_loss, *log_mae, log_mae_mean, timing))
+
+            lr_schedule.step(e)
 
 
 if __name__ == '__main__':

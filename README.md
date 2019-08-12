@@ -1,5 +1,13 @@
 # PMP
 
+## 0812
+
+1. 添加TTA
+2. SAGpool + set2set
+
+
+
+
 - model.py 模型文件
 - nn_data.py 数据读取文件
 - nn_submit.py 提交文件
