@@ -134,6 +134,8 @@ class PMPDataset(Dataset):
 
         atom = System(symbols=g.axyz[0], positions=g.axyz[1])
 
+        # g.node = [g.node[0]]
+
         acsf = ACSF_GENERATOR.create(atom)
         g.node += [acsf, g.axyz[1]]
         # g.node += [g.axyz[1]]
@@ -150,7 +152,7 @@ class PMPDataset(Dataset):
 if __name__ == '__main__':
     names = ['dsgdb9nsd_000001', 'dsgdb9nsd_000002', 'dsgdb9nsd_000030', 'dsgdb9nsd_000038']
 
-    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
+    train_loader = DataLoader(PMPDataset(names), batch_size=4, collate_fn=null_collate)
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(
             train_loader):
         print(node.size())

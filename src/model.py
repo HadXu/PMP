@@ -8,6 +8,7 @@ from torch_geometric.nn.pool.topk_pool import topk, filter_adj
 from torch_geometric.nn import GCNConv
 from torch_geometric.nn import global_mean_pool as gap, global_max_pool as gmp
 from torch_scatter import *
+from torch.nn import Parameter
 import math
 
 
@@ -25,6 +26,52 @@ class LinearBn(nn.Module):
         if self.act is not None:
             x = self.act(x)
         return x
+
+
+class GCN(nn.Module):
+    def __init__(self, node_dim, out_dim, dropout):
+        super(GCN, self).__init__()
+
+        self.in_channels = node_dim
+        self.out_channels = out_dim
+        self.dropout = dropout
+
+        self.weight = Parameter(torch.Tensor(node_dim, out_dim))
+        self.root_weight = Parameter(torch.Tensor(node_dim, out_dim))
+
+        self.bias = Parameter(torch.Tensor(out_dim))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.in_channels)
+        self.weight.data.uniform_(-stdv, stdv)
+        self.root_weight.data.uniform_(-stdv, stdv)
+        if self.bias is not None:
+            self.bias.data.uniform_(-stdv, stdv)
+
+    def forward(self, x, edge_index):
+        if edge_index.numel() > 0:
+            row, col = edge_index
+
+            out = torch.mm(x, self.weight)
+            out_col = out[col]
+
+            out_col = F.dropout(out_col, self.dropout, training=self.training)
+
+            out = scatter_add(out_col, row, dim=0, dim_size=x.size(0))
+
+            deg = scatter_add(
+                x.new_ones((row.size())), row, dim=0, dim_size=x.size(0))
+            out = out / deg.unsqueeze(-1).clamp(min=1)
+
+            out = out + torch.mm(x, self.root_weight)
+        else:
+            out = torch.mm(x, self.root_weight)
+
+        out = out + self.bias
+
+        return out
 
 
 class GraphConv(nn.Module):
@@ -163,7 +210,8 @@ class Net(torch.nn.Module):
             nn.ReLU(inplace=True)
         )
 
-        self.encoder = GraphConv(self.hidden_dim, 4)
+        # self.encoder = GraphConv(self.hidden_dim, 4)
+        self.encoder = GCN(128, 128, 0.1)
 
         self.decoder = Set2Set(self.hidden_dim, processing_step=4)
 
@@ -189,7 +237,9 @@ class Net(torch.nn.Module):
         node = self.node_embedding(node)
         edge = self.edge_embedding(edge)
 
-        node = self.encoder(node, edge_index, edge)
+        node = self.encoder(node, edge_index)
+
+        # node = self.encoder(node, edge_index, edge)
         # pool = self.decoder(node, edge_index, edge, node_index)
 
         pool = self.decoder(node, node_index)  # 2, 256
