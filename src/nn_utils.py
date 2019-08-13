@@ -150,11 +150,15 @@ def criterion(predict, coupling_value):
 def do_valid(net, valid_loader, device):
     net.eval()
     valid_num = 0
-    valid_predict = []
+    valid_predict_norm = []
     valid_coupling_type = []
     valid_coupling_value = []
 
-    valid_loss = 0
+    valid_predict_aug = []
+
+    valid_loss_norm = 0
+    valid_loss_aug = 0
+
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in tqdm(enumerate(valid_loader)):
         node = node.to(device)
         edge = edge.to(device)
@@ -164,35 +168,49 @@ def do_valid(net, valid_loader, device):
         coupling_index = coupling_index.to(device)
 
         with torch.no_grad():
+            predict_norm = net(node, edge, edge_index, node_index, coupling_index)
+            loss_norm = criterion(predict_norm, coupling_value)
+
             predict1 = net(node, edge, edge_index, node_index, coupling_index)
             coupling_index[:, [0, 1]] = coupling_index[:, [1, 0]]
             predict2 = net(node, edge, edge_index, node_index, coupling_index)
-            predict = (predict1 + predict2) / 2
-            loss = criterion(predict, coupling_value)
+            predict_aug = (predict1 + predict2) / 2
+            loss_aug = criterion(predict_aug, coupling_value)
 
         batch_size = len(infor)
-        valid_predict.append(predict.data.cpu().numpy())
+
+        valid_predict_norm.append(predict_norm.data.cpu().numpy())
+        valid_predict_aug.append(predict_aug.data.cpu().numpy())
+
         valid_coupling_type.append(coupling_index[:, 2].data.cpu().numpy())
         valid_coupling_value.append(coupling_value.data.cpu().numpy())
 
-        valid_loss += batch_size * loss.item()
+        valid_loss_norm += batch_size * loss_norm.item()
+        valid_loss_aug += batch_size * loss_aug.item()
+
         valid_num += batch_size
 
     assert (valid_num == len(valid_loader.dataset))
 
-    valid_loss = valid_loss / valid_num
+    valid_loss_norm = valid_loss_norm / valid_num
+    valid_loss_aug = valid_loss_aug / valid_num
 
     # compute
-    predict = np.concatenate(valid_predict)
+    predict_norm = np.concatenate(valid_predict_norm)
+    predict_aug = np.concatenate(valid_predict_aug)
+
     coupling_value = np.concatenate(valid_coupling_value)
     coupling_type = np.concatenate(valid_coupling_type).astype(np.int32)
 
-    mae, log_mae = compute_kaggle_metric(predict, coupling_value, coupling_type, 8)
+    mae_norm, log_mae_norm = compute_kaggle_metric(predict_norm, coupling_value, coupling_type, 8)
+    mae_aug, log_mae_aug = compute_kaggle_metric(predict_aug, coupling_value, coupling_type, 8)
 
-    log_mae_mean = sum(log_mae) / 8
+    log_mae_mean_norm = sum(log_mae_norm) / 8
+    log_mae_mean_norm_aug = sum(log_mae_aug) / 8
+
     # mae_mean = sum(mae) / 8
 
-    return valid_loss, log_mae, log_mae_mean
+    return [valid_loss_norm, log_mae_norm, log_mae_mean_norm], [valid_loss_aug, log_mae_aug, log_mae_mean_norm_aug]
 
 
 def do_train(net, train_loader, optimizer, device):

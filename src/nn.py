@@ -68,18 +68,16 @@ def train_fold(fold):
         train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=train_collect, num_workers=8,
                                   pin_memory=False,
                                   shuffle=True)
-        val_loader = DataLoader(PMPDataset(val_names), batch_size=128, collate_fn=valid_collect, num_workers=8,
+        val_loader = DataLoader(PMPDataset(val_names), batch_size=48, collate_fn=valid_collect, num_workers=8,
                                 pin_memory=False,
                                 )
 
         net = Net().to(device)
 
-        # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
         optimizer = Nadam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
-        lr_schedule = MultiStepLR(optimizer=optimizer, milestones=(100, 130, 160), gamma=0.5)
+        lr_schedule = MultiStepLR(optimizer=optimizer, milestones=(50, 80, 100, 130, 160), gamma=0.5)
 
         if 'fine' in name:
-            # name: att-fine
             net.load_state_dict(
                 torch.load(f'../checkpoint/fold{fold}_model_{name.split("-")[0]}.pth',
                            map_location=lambda storage, loc: storage))
@@ -94,16 +92,27 @@ def train_fold(fold):
 
         start = timer()
         for e in range(200):
-
             train_loss = do_train(net, train_loader, optimizer, device)
-            valid_loss, log_mae, log_mae_mean = do_valid(net, val_loader, device)
+            # valid_loss, log_mae, log_mae_mean = do_valid(net, val_loader, device)
+
+            norm, aug = do_valid(net, val_loader, device)
+
+            valid_loss_norm, log_mae_norm, log_mae_mean_norm = norm
+
+            valid_loss_aug, log_mae_aug, log_mae_mean_aug = aug
+
             timing = time_to_str((timer() - start), 'min')
-            if log_mae_mean < best_score:
-                best_score = log_mae_mean
+
+            if log_mae_mean_norm < best_score:
+                best_score = log_mae_mean_norm
                 torch.save(net.state_dict(), f'../checkpoint/fold{k}_model_{name}.pth')
-                log.write(f_boost.format(e, train_loss, valid_loss, *log_mae, log_mae_mean, timing))
+                log.write(f_boost.format(e, train_loss, valid_loss_norm, *log_mae_norm, log_mae_mean_norm, timing))
+                print('aug')
+                log.write(f_boost.format(e, train_loss, valid_loss_aug, *log_mae_aug, log_mae_mean_aug, timing))
+
             else:
-                log.write(f_normal.format(e, train_loss, valid_loss, *log_mae, log_mae_mean, timing))
+                log.write(f_normal.format(e, train_loss, valid_loss_norm, *log_mae_norm, log_mae_mean_norm, timing))
+                log.write(f_normal.format(e, train_loss, valid_loss_aug, *log_mae_aug, log_mae_mean_aug, timing))
 
             lr_schedule.step(e)
 

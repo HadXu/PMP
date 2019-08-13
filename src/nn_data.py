@@ -31,7 +31,7 @@ ACSF_GENERATOR = ACSF(
 )
 
 
-def null_collate(batch, is_train):
+def null_collate(batch, is_train=False):
     batch_size = len(batch)
 
     node = []

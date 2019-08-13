@@ -22,7 +22,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 
-device = torch.device('cuda:7')
+device = torch.device('cuda:1')
 
 SEED = 42
 random.seed(SEED)
@@ -76,7 +76,7 @@ def submit_all_fold():
         net = Net().to(device)
 
         net.load_state_dict(
-            torch.load(f'../checkpoint/fold{fold}_model_fine.pth', map_location=lambda storage, loc: storage))
+            torch.load(f'../checkpoint/fold{fold}_model_0811-fine.pth', map_location=lambda storage, loc: storage))
         print('load pre-trained done........')
         id, predict, coupling_value = submit_fold(test_names, net)
         ids = id
@@ -107,14 +107,13 @@ def get_cv_score():
     cv_score = []
     print('1JHC,   2JHC,   3JHC,   1JHN,   2JHN,   3JHN,   2JHH,   3JHH')
     for k, (tr_idx, val_idx) in enumerate(kfold.split(names)):
-        if k != 0:
-            continue
-        bs = 128
+        # if k != 0:
+        #     continue
         net.load_state_dict(
-            torch.load(f'../checkpoint/fold0_model_newf_dropout_edgebin.pth', map_location=lambda storage, loc: storage))
+            torch.load(f'../checkpoint/fold{k}_model_0811-fine.pth', map_location=lambda storage, loc: storage))
 
-        loader = DataLoader(PMPDataset(names[val_idx]), batch_size=bs, collate_fn=null_collate, num_workers=4,
-                            pin_memory=True)
+        loader = DataLoader(PMPDataset(names[val_idx]), batch_size=48, collate_fn=null_collate, num_workers=8,
+                            pin_memory=False)
         _, log_mae, log_mae_mean = do_valid(net, loader, device)
         cv_score.append(log_mae_mean)
         print('{:^7.4f}, {:^7.4f}, {:^7.4f}, {:^7.4f},{:^7.4f},{:^7.4f},{:^7.4f},{:^7.4f}'.format(*log_mae))
@@ -136,4 +135,5 @@ norm = {
 
 if __name__ == '__main__':
     get_cv_score()
-    # submit_one_fold()
+    submit_one_fold()
+    submit_all_fold()
