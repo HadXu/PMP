@@ -84,9 +84,6 @@ class GraphConv(nn.Module):
         self.bias.data.uniform_(-1.0 / math.sqrt(node_dim), 1.0 / math.sqrt(node_dim))
         self.num_step = num_step
         self.node_dim = node_dim
-        # self.max_fc = nn.Linear(128, 128)
-        # self.mean_fc = nn.Linear(128, 128)
-        # self.add_fc = nn.Linear(128, 128)
 
     def forward(self, node, edge_index, edge):
         x = node
@@ -102,12 +99,6 @@ class GraphConv(nn.Module):
             message = x_i.view(-1, 1, node_dim) @ edge  # 12,1,128
 
             message = message.view(-1, node_dim)  # 12,128
-
-            # mean = scatter_('mean', message, edge_index[1], dim_size=num_node)  # 4,128
-            # max = scatter_('max', message, edge_index[1], dim_size=num_node)  # 4,128
-            # add = scatter_('add', message, edge_index[1], dim_size=num_node)  # 4,128
-            #
-            # message = self.max_fc(max) + self.mean_fc(mean) + self.add_fc(add)
 
             message = scatter_('mean', message, edge_index[1], dim_size=num_node)
 
@@ -219,8 +210,10 @@ class Net(torch.nn.Module):
             nn.ReLU(inplace=True)
         )
 
-        self.encoder = GraphConv(self.hidden_dim, 4)
-        # self.encoder2 = GraphConv(self.hidden_dim, 4)
+        self.encoder1 = GraphConv(self.hidden_dim, 4)
+        self.encoder2 = GCN(128, 128, dropout=0.1)
+        self.encoder3 = GCN(128, 128, dropout=0.1)
+        self.encoder4 = GCN(128, 128, dropout=0.1)
 
         # self.decoder = Set2Set(self.hidden_dim, processing_step=4)
 
@@ -237,23 +230,23 @@ class Net(torch.nn.Module):
     def forward(self, node, edge, edge_index, node_index, coupling_index):
         edge_index = edge_index.t().contiguous()
 
-        # coupling_atom0_index, coupling_atom1_index, coupling_type_index, coupling_batch_index = \
-        #     torch.split(coupling_index, 1, dim=1)
-
         coupling_atom0_index, coupling_atom1_index, coupling_type_index, coupling_batch_index, edge_coupling_index = \
             torch.split(coupling_index, 1, dim=1)
 
         node = self.node_embedding(node)
         edge = self.edge_embedding(edge)
 
-        # node = self.encoder(node, edge_index)  # sagpool
+        node = self.encoder1(node, edge_index, edge)
 
-        node = self.encoder(node, edge_index, edge)  # set2set
-        # node = self.encoder2(node, edge_index, edge)
+        node = self.encoder2(node, edge_index)
 
-        pool = self.decoder(node, edge_index, edge, node_index)
+        node = self.encoder3(node, edge_index)
 
-        # pool = self.decoder(node, node_index)  # 2, 256
+        node = self.encoder4(node, edge_index)
+
+        pool = self.decoder(node, edge_index, edge, node_index)  # sagpool
+
+        # pool = self.decoder(node, node_index)  # set2set
 
         pool = torch.index_select(pool, dim=0, index=coupling_batch_index.view(-1))  # 16,256
         node0 = torch.index_select(node, dim=0, index=coupling_atom0_index.view(-1))  # 16,128
@@ -262,10 +255,7 @@ class Net(torch.nn.Module):
 
         att = node0 + node1 - node0 * node1
 
-        # predict
         predict = self.predict(torch.cat([pool, node0, node1, att, edge], -1))
-
-        # predict = self.predict(torch.cat([pool, node0, node1, att], -1))
 
         predict = torch.gather(predict, 1, coupling_type_index).view(-1)  # 16
 
