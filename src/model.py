@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from nn_data import PMPDataset, null_collate, Graph, Coupling, train_collect
+from nn_data import PMPDataset, null_collate, Graph, Coupling
 from torch_geometric.utils import scatter_
 from torch_geometric.nn.pool.topk_pool import topk, filter_adj
 from torch_geometric.nn import GCNConv
@@ -194,7 +194,7 @@ class Net(torch.nn.Module):
         self.hidden_dim = 128
 
         self.node_embedding = nn.Sequential(
-            LinearBn(96, self.hidden_dim),
+            LinearBn(97, self.hidden_dim),
             nn.ReLU(inplace=True),
             LinearBn(self.hidden_dim, self.hidden_dim),
             nn.ReLU(inplace=True),
@@ -213,11 +213,11 @@ class Net(torch.nn.Module):
         self.encoder1 = GraphConv(self.hidden_dim, 4)
         self.encoder2 = GCN(128, 128, dropout=0.1)
         self.encoder3 = GCN(128, 128, dropout=0.1)
-        self.encoder4 = GCN(128, 128, dropout=0.1)
+        # self.encoder4 = GCN(128, 128, dropout=0.1)
 
-        # self.decoder = Set2Set(self.hidden_dim, processing_step=4)
+        self.decoder = Set2Set(self.hidden_dim, processing_step=4)
 
-        self.decoder = SAGPool(self.hidden_dim)
+        # self.decoder = SAGPool(self.hidden_dim)
 
         self.predict = nn.Sequential(
             LinearBn(6 * self.hidden_dim, 1024),
@@ -239,14 +239,14 @@ class Net(torch.nn.Module):
         node = self.encoder1(node, edge_index, edge)
 
         node = self.encoder2(node, edge_index)
-
+        #
         node = self.encoder3(node, edge_index)
+        #
+        # node = self.encoder4(node, edge_index)
 
-        node = self.encoder4(node, edge_index)
+        # pool = self.decoder(node, edge_index, edge, node_index)  # sagpool
 
-        pool = self.decoder(node, edge_index, edge, node_index)  # sagpool
-
-        # pool = self.decoder(node, node_index)  # set2set
+        pool = self.decoder(node, node_index)  # set2set
 
         pool = torch.index_select(pool, dim=0, index=coupling_batch_index.view(-1))  # 16,256
         node0 = torch.index_select(node, dim=0, index=coupling_atom0_index.view(-1))  # 16,128
@@ -267,7 +267,7 @@ class Net(torch.nn.Module):
 
 if __name__ == '__main__':
     names = ['dsgdb9nsd_000002', 'dsgdb9nsd_000001', 'dsgdb9nsd_000030', 'dsgdb9nsd_000038']
-    train_loader = DataLoader(PMPDataset(names), batch_size=2, collate_fn=train_collect)
+    train_loader = DataLoader(PMPDataset(names), batch_size=2, collate_fn=null_collate)
     net = Net()
 
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(train_loader):

@@ -12,6 +12,7 @@
 """
 __author__ = 'haxu'
 
+from molmod import *
 import os
 import numpy as np
 from sklearn.model_selection import GroupKFold
@@ -194,8 +195,6 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
     hybridization = np.zeros((num_atom, len(HYBRIDIZATION)), np.uint8)
     num_h = np.zeros((num_atom, 1), np.float32)  # real
     atomic = np.zeros((num_atom, 1), np.float32)
-    valence = np.zeros((num_atom, 1), np.float32)
-    peak = np.zeros((num_atom, 1), np.float32)
 
     for i in range(num_atom):
         atom = mol.GetAtomWithIdx(i)
@@ -206,11 +205,6 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
         num_h[i] = atom.GetTotalNumHs(includeNeighbors=True)
         atomic[i] = atom.GetAtomicNum()
 
-        # new feautures
-        valence[i] = atom.GetExplicitValence()
-        nei = [n.GetTotalNumHs() for n in atom.GetNeighbors()]
-        peak[i] = sum([n + 1 if n > 0 and num_h[i] > 0 else 0 for n in nei])
-
     for t in range(0, len(feature)):
         if feature[t].GetFamily() == 'Donor':
             for i in feature[t].GetAtomIds():
@@ -220,7 +214,6 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
                 acceptor[i] = 1
 
     num_edge = num_atom * num_atom - num_atom
-    # bug
     edge_index = np.zeros((num_edge, 2), np.uint32)
     bond_type = np.zeros((num_edge, len(BOND_TYPE)), np.uint32)
     distance = np.zeros((num_edge, 1), np.float32)
@@ -243,11 +236,15 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
 
             ij += 1
 
+    m = Molecule.from_file(f"../input/champs-scalar-coupling/structures/{name}.xyz")
+    m.set_default_graph()
+    xyz = m.coordinates
+
     graph = Graph(
         name,
         Chem.MolToSmiles(mol),
         [a, xyz],
-        [symbol, acceptor, donor, aromatic, hybridization, num_h, atomic, valence, peak],
+        [symbol, acceptor, donor, aromatic, hybridization, num_h, atomic],
         [bond_type, distance, angle, ],
         edge_index,
         coupling,
@@ -283,21 +280,21 @@ if __name__ == '__main__':
 
     g = make_graph('dsgdb9nsd_000214', gb_structure, gb_scalar_coupling)
 
-    # print(g.node)
-    # print(g.edge)
-    # print(g.smiles)
+    print(g.node)
+    print(g.edge)
+    print(g.smiles)
 
-    # param = []
-    #
-    # for i, molecule_name in enumerate(molecule_names):
-    #     graph_file = f'../input/graph/{molecule_name}.pickle'
-    #     p = (i, molecule_name, gb_structure, gb_scalar_coupling, graph_file)
-    #     param.append(p)
-    #
-    # print('load done.')
-    #
-    # pool = mp.Pool(processes=55)
-    # _ = pool.map(do_one, param)
-    #
-    # pool.close()
-    # pool.join()
+    param = []
+
+    for i, molecule_name in enumerate(molecule_names):
+        graph_file = f'../input/graph/{molecule_name}.pickle'
+        p = (i, molecule_name, gb_structure, gb_scalar_coupling, graph_file)
+        param.append(p)
+
+    print('load done.')
+
+    pool = mp.Pool(processes=55)
+    _ = pool.map(do_one, param)
+
+    pool.close()
+    pool.join()

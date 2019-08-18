@@ -12,6 +12,7 @@
 """
 __author__ = 'haxu'
 
+import pandas as pd
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 import pickle
@@ -31,7 +32,7 @@ ACSF_GENERATOR = ACSF(
 )
 
 
-def null_collate(batch, is_train=False):
+def null_collate(batch):
     batch_size = len(batch)
 
     node = []
@@ -39,11 +40,7 @@ def null_collate(batch, is_train=False):
     edge_index = []
     node_index = []
 
-    # 边属于哪一个分子
-    edge_belong_index = []
-
     coupling_value = []
-    coupling_edge_index = []
     coupling_atom_index = []
     coupling_type_index = []
     coupling_batch_index = []
@@ -64,22 +61,11 @@ def null_collate(batch, is_train=False):
         edge_index.append(graph.edge_index + offset)
         node_index.append([b] * num_node)
 
-        # # edge index
-        # edge_belong_index.append([b] * (num_node * (num_node - 1)))
-
         num_coupling = len(graph.coupling.value)
 
         coupling_value.append(graph.coupling.value)
 
-        cp_edge = graph.coupling.index[:, :2] + offset
-
-        if is_train:
-            if random.random() < 0.5:
-                coupling_atom_index.append(cp_edge)
-            else:
-                coupling_atom_index.append(cp_edge[:, ::-1])
-        else:
-            coupling_atom_index.append(graph.coupling.index[:, :2] + offset)
+        coupling_atom_index.append(graph.coupling.index[:, :2] + offset)
 
         coupling_type_index.append(graph.coupling.type)
         coupling_batch_index.append([b] * num_coupling)
@@ -100,7 +86,6 @@ def null_collate(batch, is_train=False):
     edge = torch.from_numpy(np.concatenate(edge)).float()
     edge_index = torch.from_numpy(np.concatenate(edge_index).astype(np.int64)).long()
     node_index = torch.from_numpy(np.concatenate(node_index)).long()
-    # edge_belong_index = torch.from_numpy(np.concatenate(edge_belong_index)).long()
 
     coupling_value = torch.from_numpy(np.concatenate(coupling_value)).float()
     coupling_index = np.concatenate([
@@ -122,8 +107,9 @@ def one_hot_encoding(x, set):
     return one_hot
 
 
-train_collect = lambda x: null_collate(x, is_train=True)
-valid_collect = lambda x: null_collate(x, is_train=False)
+# df_coulomb = pd.read_csv('../input/champs-scalar-coupling/struct_eigen.csv').groupby('molecule_name')
+with open('../input/champs-scalar-coupling/charge.pkl', 'rb') as f:
+    charge = pickle.load(f)
 
 
 class PMPDataset(Dataset):
@@ -145,15 +131,20 @@ class PMPDataset(Dataset):
         assert isinstance(g, Graph)
         assert (g.molecule_name == name)
 
+        # cou = df_coulomb.get_group(name)
+        # cou = cou.drop('molecule_name', axis=1).values
+
         atom = System(symbols=g.axyz[0], positions=g.axyz[1])
 
-        # g.node = [g.node[0]]
+        c = charge.get(f'{name}.xyz')
 
         acsf = ACSF_GENERATOR.create(atom)
-        g.node += [acsf]
-        g.node += [g.axyz[1]]
+        g.node += [acsf, g.axyz[1] * 2, c]
 
         g.node = np.concatenate(g.node, -1)
+
+        # g.edge[1] *= 1.889726133921252
+
         g.edge = np.concatenate(g.edge, -1)
 
         return g
@@ -165,14 +156,13 @@ class PMPDataset(Dataset):
 if __name__ == '__main__':
     names = ['dsgdb9nsd_000001', 'dsgdb9nsd_000002', 'dsgdb9nsd_000030', 'dsgdb9nsd_000038']
 
-    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=train_collect)
+    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(
             train_loader):
         print(node.size())
         print(edge.size())
         print(edge_index)
         print(node_index)
-        print(coupling_index)
         print(coupling_index)
 
         break

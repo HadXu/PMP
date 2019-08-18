@@ -1,16 +1,15 @@
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data import DataLoader
 from model import Net
 from nn_utils import do_train, do_valid, time_to_str, Graph, Coupling, Logger, adjust_learning_rate
 import random
 from Nadam import Nadam
 from sklearn.model_selection import KFold
 from timeit import default_timer as timer
-from nn_data import PMPDataset, null_collate, train_collect, valid_collect
+from nn_data import PMPDataset, null_collate
 from argparse import ArgumentParser
-from torch.optim.lr_scheduler import MultiStepLR
 
 parser = ArgumentParser(description='train PMP')
 
@@ -65,17 +64,16 @@ def train_fold(fold):
 
         log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
 
-        train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=valid_collect, num_workers=8,
+        train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=8,
                                   pin_memory=False,
                                   shuffle=True)
-        val_loader = DataLoader(PMPDataset(val_names), batch_size=48, collate_fn=valid_collect, num_workers=8,
+        val_loader = DataLoader(PMPDataset(val_names), batch_size=48, collate_fn=null_collate, num_workers=8,
                                 pin_memory=False,
                                 )
 
         net = Net().to(device)
 
         optimizer = Nadam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr)
-
         if 'fine' in name:
             net.load_state_dict(
                 torch.load(f'../checkpoint/fold{fold}_model_{name.split("-")[0]}.pth',
