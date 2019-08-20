@@ -213,7 +213,6 @@ class Net(torch.nn.Module):
         self.encoder1 = GraphConv(self.hidden_dim, 4)
         self.encoder2 = GCN(128, 128, dropout=0.1)
         self.encoder3 = GCN(128, 128, dropout=0.1)
-        # self.encoder4 = GCN(128, 128, dropout=0.1)
 
         self.decoder = Set2Set(self.hidden_dim, processing_step=4)
 
@@ -239,10 +238,8 @@ class Net(torch.nn.Module):
         node = self.encoder1(node, edge_index, edge)
 
         node = self.encoder2(node, edge_index)
-        #
+
         node = self.encoder3(node, edge_index)
-        #
-        # node = self.encoder4(node, edge_index)
 
         # pool = self.decoder(node, edge_index, edge, node_index)  # sagpool
 

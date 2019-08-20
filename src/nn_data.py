@@ -12,14 +12,12 @@
 """
 __author__ = 'haxu'
 
-import pandas as pd
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 import pickle
 import torch
 import numpy as np
 from nn_utils import Graph, Coupling
-import random
 
 from dscribe.descriptors import ACSF
 from dscribe.core.system import System
@@ -114,12 +112,11 @@ with open('../input/champs-scalar-coupling/charge.pkl', 'rb') as f:
 
 class PMPDataset(Dataset):
     def __init__(self, names, type='1JHC', is_seven=False):
-        self.path = Path('../input/graph_old')
+        self.path = Path('../input/graph0815')
         if is_seven:
             self.path = Path('/opt/ml/disk/PMP/input/graph_old')
         self.names = names
         self.type = COUPLING_TYPE.index(type)
-        # self.bins = np.arange(0.959, 12.05, 0.5)  # 23
 
     def __getitem__(self, x):
         # molecule_name, smiles, axyz(atom, xyz), node, edge, edge_index
@@ -131,19 +128,14 @@ class PMPDataset(Dataset):
         assert isinstance(g, Graph)
         assert (g.molecule_name == name)
 
-        # cou = df_coulomb.get_group(name)
-        # cou = cou.drop('molecule_name', axis=1).values
-
         atom = System(symbols=g.axyz[0], positions=g.axyz[1])
 
         c = charge.get(f'{name}.xyz')
 
         acsf = ACSF_GENERATOR.create(atom)
-        g.node += [acsf, g.axyz[1] * 2, c]
+        g.node += [acsf, g.axyz[1], c]
 
         g.node = np.concatenate(g.node, -1)
-
-        # g.edge[1] *= 1.889726133921252
 
         g.edge = np.concatenate(g.edge, -1)
 
@@ -156,7 +148,10 @@ class PMPDataset(Dataset):
 if __name__ == '__main__':
     names = ['dsgdb9nsd_000001', 'dsgdb9nsd_000002', 'dsgdb9nsd_000030', 'dsgdb9nsd_000038']
 
-    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
+    # df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
+    # names = df_train['molecule_name'].unique()
+
+    train_loader = DataLoader(PMPDataset(names), batch_size=4, collate_fn=null_collate)
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(
             train_loader):
         print(node.size())
