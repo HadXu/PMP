@@ -1,0 +1,18 @@
+1. 数据
+
+- 在最原始的基础上添加了边的索引，能够索引到边在bs中的位置，也就是能够获得边的特征。
+- 在最原始的xyz之上乘以1.889726133921252
+
+2. 模型
+
+- 3个GCN(1个MPNN+2GCN)
+
+node = self.encoder1(node, edge_index, edge)
+node = self.encoder2(node, edge_index)
+node = self.encoder3(node, edge_index)
+
+
+3. 融合
+
+1. SAGPOOling
+2. set2set
