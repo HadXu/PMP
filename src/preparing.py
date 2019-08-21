@@ -27,82 +27,13 @@ from rdkit import Chem
 from utils import mol_from_axyz
 from rdkit import RDConfig
 from rdkit.Chem import ChemicalFeatures
+import rdkit.Chem.rdMolDescriptors as rdMolDescriptors
+import rdkit.Chem.rdPartialCharges as rdPartialCharges
+import rdkit.Chem.EState as EState
 
-
-def split_fold():
-    df = pd.read_csv('../input/champs-scalar-coupling/train.csv')
-
-    X = df['scalar_coupling_constant']
-    y = df['scalar_coupling_constant']
-    groups = df['molecule_name']
-
-    kfold = GroupKFold(n_splits=5)
-    res = pd.DataFrame({})
-    for fold, (_, val_idx) in enumerate(kfold.split(X, y, groups)):
-        tmp = df.loc[val_idx]
-        tmp['fold'] = fold
-        res = pd.concat([res, tmp])
-    res.to_csv('../input/champs-scalar-coupling/train_split_group.csv', index=False)
-
-
-path = Path('../input/champs-scalar-coupling/structures')
-
-
-def fun(df):
-    name = df['molecule_name']
-    atomicNumList, charge, xyz_coordinates = read_xyz_file(path / f'{name}.xyz')
-    mol = xyz2mol(atomicNumList, xyz_coordinates, charge, True, True)
-    atom = mol.GetAtomWithIdx(df['atom_index'])
-    AllChem.ComputeGasteigerCharges(mol)
-    df['charge'] = atom.GetProp('_GasteigerCharge')
-    nb = [a.GetSymbol() for a in atom.GetNeighbors()]
-    df['nb_h'] = sum([_ == 'H' for _ in nb])
-    df['nb_c'] = sum([_ == 'C' for _ in nb])
-    df['nb_n'] = sum([_ == 'N' for _ in nb])
-    df['nb_o'] = sum([_ == 'O' for _ in nb])
-    df['nb_f'] = sum([_ == 'F' for _ in nb])
-    df['hybridization'] = int(atom.GetHybridization())
-
-    df['inring'] = int(atom.IsInRing())
-    df['inring3'] = int(atom.IsInRingSize(3))
-    df['inring4'] = int(atom.IsInRingSize(4))
-    df['inring5'] = int(atom.IsInRingSize(5))
-    df['inring6'] = int(atom.IsInRingSize(6))
-    df['inring7'] = int(atom.IsInRingSize(7))
-    df['inring8'] = int(atom.IsInRingSize(8))
-
-    return df
-
-
-def multi_task(df):
-    res = df(lambda x: fun(x), axis=1)
-    return res
-
-
-def apply_mul_core(df):
-    import multiprocessing as mlp
-    num_cpu = 50
-    pool = mlp.Pool(num_cpu)
-    batch_num = 1 + len(df) // num_cpu
-    results = []
-    for i in range(num_cpu):
-        task = df[i * batch_num: (i + 1) * batch_num]
-        result = pool.apply_async(multi_task, (task,))
-        results.append(result)
-    pool.close()
-    pool.join()
-    res = pd.DataFrame({})
-    for result in results:
-        feat = result.get()
-        res = pd.concat([res, feat])
-    return res
-
-
-def struct_feature():
-    df_structures = pd.read_csv('../input/champs-scalar-coupling/structures.csv')
-
-    df_structures_new = apply_mul_core(df_structures)
-    df_structures_new.to_csv('../input/champs-scalar-coupling/structures_621.csv', index=False)
+from dscribe.descriptors import ACSF
+from dscribe.core.system import System
+import openbabel
 
 
 def one_hot_encoding(x, set):
@@ -148,12 +79,6 @@ HYBRIDIZATION = [
     Chem.rdchem.HybridizationType.SP3,
 ]
 
-# xiong
-atom2polar = {'H': 2.2, 'O': 3.44, 'C': 2.55, 'F': 3.98, 'N': 3.04}
-atomic_radius = {'H': 0.38, 'C': 0.77, 'N': 0.75, 'O': 0.73, 'F': 0.71}
-fudge_factor = 0.05
-atomic_radius = {k: v + fudge_factor for k, v in atomic_radius.items()}
-
 
 def gaussian_rbf(x, min_x, max_x, center_num):
     center_point = np.linspace(min_x, max_x, center_num)
@@ -164,17 +89,46 @@ def gaussian_rbf(x, min_x, max_x, center_num):
 dist_min = 0.95860666
 dist_max = 12.040386
 
+ACSF_GENERATOR = ACSF(
+    species=['H', 'C', 'N', 'O', 'F'],
+    rcut=6.0,
+    g2_params=[[1, 1], [1, 2], [1, 3]],
+    g4_params=[[1, 1, 1], [1, 2, 1], [1, 1, -1], [1, 2, -1]],
+)
+
+obConversion = openbabel.OBConversion()
+obConversion.SetInAndOutFormats("xyz", "mol2")
+
+atomic_radius = {'H': 0.38, 'C': 0.77, 'N': 0.75, 'O': 0.73, 'F': 0.71}  # Without fudge factor
+fudge_factor = 0.05
+atomic_radius = {k: v + fudge_factor for k, v in atomic_radius.items()}
+electronegativity = {'H': 2.2, 'C': 2.55, 'N': 3.04, 'O': 3.44, 'F': 3.98}
+electronegativity_square = {'H': 2.2 * 2.2, 'C': 2.55 * 2.55, 'N': 3.04 * 3.04, 'O': 3.44 * 3.44, 'F': 3.98 * 3.98}
+
+
+def normal_dict(dict_input):
+    min_value = min(dict_input.values())
+    max_value = max(dict_input.values())
+    for key in dict_input.keys():
+        dict_input[key] = (dict_input[key] - min_value) / \
+                          (max_value - min_value)
+    return dict_input
+
+
+atomic_mass = {'H': 1.0079, 'C': 12.0107, 'N': 14.0067, 'O': 15.9994, 'F': 18.9984}
+vanderwaalsradius = {'H': 120, 'C': 185, 'N': 154, 'O': 140, 'F': 135}
+covalenzradius = {'H': 30, 'C': 77, 'N': 70, 'O': 66, 'F': 58}
+ionization_energy = {'H': 13.5984, 'C': 11.2603, 'N': 14.5341, 'O': 13.6181, 'F': 17.4228}
+
+atomic_mass = normal_dict(atomic_mass)
+vanderwaalsradius = normal_dict(vanderwaalsradius)
+covalenzradius = normal_dict(covalenzradius)
+ionization_energy = normal_dict(ionization_energy)
+
 
 def make_graph(name, gb_structure, gb_scalar_coupling):
     # ['id', 'molecule_name', 'atom_index_0', 'atom_index_1', 'type','scalar_coupling_constant']
-    df = gb_scalar_coupling.get_group(name)
-
-    coupling = Coupling(df['id'].values,
-                        df[['fc', 'sd', 'pso', 'dso']].values,
-                        df[['atom_index_0', 'atom_index_1']].values,
-                        np.array([COUPLING_TYPE.index(t) for t in df.type.values], np.int32),
-                        df['scalar_coupling_constant'].values,
-                        )
+    coupling_df = gb_scalar_coupling.get_group(name)
 
     # [molecule_name,atom_index,atom,x,y,z]
     df = gb_structure.get_group(name)
@@ -183,6 +137,8 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
     xyz = df[['x', 'y', 'z']].values
 
     mol = mol_from_axyz(a, xyz)
+    mol_op = openbabel.OBMol()
+    obConversion.ReadFile(mol_op, f'../input/champs-scalar-coupling/structures/{name}.xyz')
 
     factory = ChemicalFeatures.BuildFeatureFactory(os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef'))
     feature = factory.GetFeaturesForMol(mol)
@@ -196,14 +152,48 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
     num_h = np.zeros((num_atom, 1), np.float32)  # real
     atomic = np.zeros((num_atom, 1), np.float32)
 
+    # new features
+    degree = np.zeros((num_atom, 1), np.uint8)
+    formalCharge = np.zeros((num_atom, 1), np.float32)
+    chiral_tag = np.zeros((num_atom, 1), np.uint8)
+    crippen_contribs = np.zeros((num_atom, 2), np.float32)
+    tpsa = np.zeros((num_atom, 1), np.float32)
+    labute_asac = np.zeros((num_atom, 1), np.float32)
+    gasteiger_charges = np.zeros((num_atom, 1), np.float32)
+    esataindices = np.zeros((num_atom, 1), np.float32)
+    atomic_radiuss = np.zeros((num_atom, 1), np.float32)
+    electronegate = np.zeros((num_atom, 1), np.float32)
+    electronegate_sqre = np.zeros((num_atom, 1), np.float32)
+    mass = np.zeros((num_atom, 1), np.float32)
+    van = np.zeros((num_atom, 1), np.float32)
+    cov = np.zeros((num_atom, 1), np.float32)
+    ion = np.zeros((num_atom, 1), np.float32)
+
     for i in range(num_atom):
         atom = mol.GetAtomWithIdx(i)
+        atom_op = mol_op.GetAtomById(i)
         symbol[i] = one_hot_encoding(atom.GetSymbol(), SYMBOL)
         aromatic[i] = atom.GetIsAromatic()
         hybridization[i] = one_hot_encoding(atom.GetHybridization(), HYBRIDIZATION)
-
         num_h[i] = atom.GetTotalNumHs(includeNeighbors=True)
         atomic[i] = atom.GetAtomicNum()
+
+        degree[i] = atom.GetTotalDegree()
+        formalCharge[i] = atom.GetFormalCharge()
+        chiral_tag[i] = int(atom.GetChiralTag())
+
+        crippen_contribs[i] = rdMolDescriptors._CalcCrippenContribs(mol)[i]
+        tpsa[i] = rdMolDescriptors._CalcTPSAContribs(mol)[i]
+        labute_asac[i] = rdMolDescriptors._CalcLabuteASAContribs(mol)[0][i]
+        gasteiger_charges[i] = atom_op.GetPartialCharge()
+        esataindices[i] = EState.EStateIndices(mol)[i]
+        atomic_radiuss[i] = atomic_radius[atom.GetSymbol()]
+        electronegate[i] = electronegativity[atom.GetSymbol()]
+        electronegate_sqre[i] = electronegativity_square[atom.GetSymbol()]
+        mass[i] = atomic_mass[atom.GetSymbol()]
+        van[i] = vanderwaalsradius[atom.GetSymbol()]
+        cov[i] = covalenzradius[atom.GetSymbol()]
+        ion[i] = ionization_energy[atom.GetSymbol()]
 
     for t in range(0, len(feature)):
         if feature[t].GetFamily() == 'Donor':
@@ -236,30 +226,41 @@ def make_graph(name, gb_structure, gb_scalar_coupling):
 
             ij += 1
 
-    m = Molecule.from_file(f"../input/champs-scalar-coupling/structures/{name}.xyz")
-    m.set_default_graph()
-    xyz = m.coordinates
+    xyz = xyz * 1.889726133921252
+
+    atom = System(symbols=a, positions=xyz)
+    acsf = ACSF_GENERATOR.create(atom)
+
+    l = []
+    for item in coupling_df[['atom_index_0', 'atom_index_1']].values.tolist():
+        i = edge_index.tolist().index(item)
+        l.append(i)
+
+    l = np.array(l)
+
+    coupling_edge_index = np.concatenate([coupling_df[['atom_index_0', 'atom_index_1']].values, l.reshape(len(l), 1)],
+                                         axis=1)
+
+    coupling = Coupling(coupling_df['id'].values,
+                        coupling_df[['fc', 'sd', 'pso', 'dso']].values,
+                        coupling_edge_index,
+                        np.array([COUPLING_TYPE.index(t) for t in coupling_df.type.values], np.int32),
+                        coupling_df['scalar_coupling_constant'].values,
+                        )
 
     graph = Graph(
         name,
         Chem.MolToSmiles(mol),
         [a, xyz],
-        [symbol, acceptor, donor, aromatic, hybridization, num_h, atomic],
+        [acsf, symbol, acceptor, donor, aromatic, hybridization, num_h, atomic, degree, formalCharge, chiral_tag,
+         crippen_contribs, tpsa, labute_asac, gasteiger_charges, esataindices, atomic_radiuss, electronegate,
+         electronegate_sqre, mass, van, cov, ion],
         [bond_type, distance, angle, ],
         edge_index,
         coupling,
     )
 
     return graph
-
-
-def do_one(p):
-    i, molecule_name, gb_structure, gb_scalar_coupling, graph_file = p
-    g = make_graph(molecule_name, gb_structure, gb_scalar_coupling)
-
-    with open(graph_file, 'wb') as f:
-        pickle.dump(g, f)
-    return
 
 
 if __name__ == '__main__':
@@ -278,7 +279,7 @@ if __name__ == '__main__':
 
     molecule_names = df_scalar_coupling.molecule_name.unique()
 
-    g = make_graph('dsgdb9nsd_000214', gb_structure, gb_scalar_coupling)
+    g = make_graph('dsgdb9nsd_000003', gb_structure, gb_scalar_coupling)
 
     print(g.node)
     print(g.edge)
@@ -286,9 +287,17 @@ if __name__ == '__main__':
 
     param = []
 
+
+    def do_one(p):
+        molecule_name, graph_file = p
+        g = make_graph(molecule_name, gb_structure, gb_scalar_coupling)
+        with open(graph_file, 'wb') as f:
+            pickle.dump(g, f)
+
+
     for i, molecule_name in enumerate(molecule_names):
         graph_file = f'../input/graph/{molecule_name}.pickle'
-        p = (i, molecule_name, gb_structure, gb_scalar_coupling, graph_file)
+        p = (molecule_name, graph_file)
         param.append(p)
 
     print('load done.')

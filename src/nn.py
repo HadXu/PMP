@@ -4,12 +4,13 @@ import torch
 from torch.utils.data import DataLoader
 from model import Net
 from nn_utils import do_train, do_valid, time_to_str, Graph, Coupling, Logger, adjust_learning_rate
-import random
 from Nadam import Nadam
 from sklearn.model_selection import KFold
 from timeit import default_timer as timer
 from nn_data import PMPDataset, null_collate
 from argparse import ArgumentParser
+import random
+from itertools import chain
 
 parser = ArgumentParser(description='train PMP')
 
@@ -49,8 +50,11 @@ def train_fold(fold):
     df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
     names = df_train['molecule_name'].unique()
 
+    # names = np.load('../input/champs-scalar-coupling/names.npy')
+
     kfold = KFold(n_splits=5, random_state=42)
     for k, (tr_idx, val_idx) in enumerate(kfold.split(names)):
+        # for k in range(5):
         if k != fold:
             continue
         log.write(f'~~~~~~~~~~~~ fold {fold} ~~~~~~~~~~~~\n')
@@ -63,6 +67,11 @@ def train_fold(fold):
         val_names = names[val_idx]
 
         log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
+
+        # val_names = names[k]
+        # tr_names = list(chain(*(names[:k].tolist() + names[k + 1:].tolist())))
+        #
+        # print(len(val_names))
 
         train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=8,
                                   pin_memory=False,

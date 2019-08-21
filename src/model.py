@@ -28,6 +28,39 @@ class LinearBn(nn.Module):
         return x
 
 
+class NodeEmbModule(nn.Module):
+    def __init__(self, hidden):
+        super(NodeEmbModule, self).__init__()
+        self.fc1 = nn.Sequential(
+            LinearBn(97, hidden),
+            nn.ReLU(inplace=True),
+        )
+        self.fc2 = nn.Sequential(
+            LinearBn(hidden, hidden),
+            nn.ReLU(inplace=True),
+        )
+
+        hidden_cat = hidden * 2
+        self.se = nn.Sequential(
+            nn.Linear(hidden_cat, hidden_cat // 4),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_cat // 4, hidden_cat),
+            nn.Sigmoid()
+        )
+        self.fc3 = nn.Sequential(
+            LinearBn(hidden_cat, hidden),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        x1 = self.fc1(x)
+        x2 = self.fc2(x1)
+        x = torch.cat([x1, x2], dim=-1)
+        x = self.se(x) * x
+        x = self.fc3(x)
+        return x
+
+
 class GCN(nn.Module):
     def __init__(self, node_dim, out_dim, dropout):
         super(GCN, self).__init__()
@@ -194,12 +227,13 @@ class Net(torch.nn.Module):
         self.hidden_dim = 128
 
         self.node_embedding = nn.Sequential(
-            LinearBn(97, self.hidden_dim),
+            LinearBn(113, self.hidden_dim),
             nn.ReLU(inplace=True),
             LinearBn(self.hidden_dim, self.hidden_dim),
             nn.ReLU(inplace=True),
         )
 
+        # self.node_embedding = NodeEmbModule(self.hidden_dim)
         self.edge_embedding = nn.Sequential(
             LinearBn(6, 256),
             nn.ReLU(inplace=True),
@@ -226,6 +260,17 @@ class Net(torch.nn.Module):
             nn.Linear(512, 8),
         )
 
+        # self.node_se = nn.Sequential(
+        #     nn.Linear(self.hidden_dim * 4, self.hidden_dim),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(self.hidden_dim, self.hidden_dim * 4),
+        #     nn.Sigmoid()
+        # )
+        # self.node_down = nn.Sequential(
+        #     LinearBn(self.hidden_dim * 4, self.hidden_dim),
+        #     nn.ReLU(inplace=True),
+        # )
+
     def forward(self, node, edge, edge_index, node_index, coupling_index):
         edge_index = edge_index.t().contiguous()
 
@@ -240,6 +285,9 @@ class Net(torch.nn.Module):
         node = self.encoder2(node, edge_index)
 
         node = self.encoder3(node, edge_index)
+
+        # node = torch.cat([node, node1, node2, node3], dim=-1)
+        # node = self.node_down(self.node_se(node) * node)
 
         # pool = self.decoder(node, edge_index, edge, node_index)  # sagpool
 

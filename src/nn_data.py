@@ -39,6 +39,7 @@ def null_collate(batch):
     node_index = []
 
     coupling_value = []
+    coupling_edge_index = []
     coupling_atom_index = []
     coupling_type_index = []
     coupling_batch_index = []
@@ -57,6 +58,7 @@ def null_collate(batch):
         graph.edge_index = graph.edge_index.astype(np.int64)
 
         edge_index.append(graph.edge_index + offset)
+
         node_index.append([b] * num_node)
 
         num_coupling = len(graph.coupling.value)
@@ -64,6 +66,7 @@ def null_collate(batch):
         coupling_value.append(graph.coupling.value)
 
         coupling_atom_index.append(graph.coupling.index[:, :2] + offset)
+        coupling_edge_index.append(graph.coupling.index[:, 2] + edge_offset)
 
         coupling_type_index.append(graph.coupling.type)
         coupling_batch_index.append([b] * num_coupling)
@@ -71,14 +74,6 @@ def null_collate(batch):
         infor.append((graph.molecule_name, graph.smiles, graph.coupling.id))
         offset += num_node
         edge_offset += (num_node - 1) * num_node
-
-    edge_index_tmp = np.concatenate(edge_index).astype(np.int64).tolist()
-    coupling_atom_index_tmp = np.concatenate(coupling_atom_index).tolist()
-
-    l = []
-    for item in coupling_atom_index_tmp:
-        i = edge_index_tmp.index(item)
-        l.append(i)
 
     node = torch.from_numpy(np.concatenate(node)).float()
     edge = torch.from_numpy(np.concatenate(edge)).float()
@@ -90,7 +85,7 @@ def null_collate(batch):
         np.concatenate(coupling_atom_index),
         np.concatenate(coupling_type_index).reshape(-1, 1),
         np.concatenate(coupling_batch_index).reshape(-1, 1),
-        np.array(l).reshape(-1, 1),
+        np.concatenate(coupling_edge_index).reshape(-1, 1),
     ], -1)
 
     coupling_index = torch.from_numpy(coupling_index).long()
@@ -112,7 +107,7 @@ with open('../input/champs-scalar-coupling/charge.pkl', 'rb') as f:
 
 class PMPDataset(Dataset):
     def __init__(self, names, type='1JHC', is_seven=False):
-        self.path = Path('../input/graph0815')
+        self.path = Path('../input/graph0821')
         if is_seven:
             self.path = Path('/opt/ml/disk/PMP/input/graph_old')
         self.names = names
@@ -128,12 +123,9 @@ class PMPDataset(Dataset):
         assert isinstance(g, Graph)
         assert (g.molecule_name == name)
 
-        atom = System(symbols=g.axyz[0], positions=g.axyz[1])
-
         c = charge.get(f'{name}.xyz')
 
-        acsf = ACSF_GENERATOR.create(atom)
-        g.node += [acsf, g.axyz[1], c]
+        g.node += [g.axyz[1], c]
 
         g.node = np.concatenate(g.node, -1)
 
@@ -151,14 +143,19 @@ if __name__ == '__main__':
     # df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
     # names = df_train['molecule_name'].unique()
 
-    train_loader = DataLoader(PMPDataset(names), batch_size=4, collate_fn=null_collate)
+    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(
             train_loader):
         print(node.size())
         print(edge.size())
-        print(edge_index)
-        print(node_index)
+
         print(coupling_index)
+
+        # print(node.size())
+        # print(edge.size())
+        # print(edge_index)
+        # print(node_index)
+        # print(coupling_index)
 
         break
 

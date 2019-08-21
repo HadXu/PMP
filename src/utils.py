@@ -15,6 +15,7 @@ __author__ = 'haxu'
 import os
 import sys
 import numpy as np
+import copy
 import pandas as pd
 from xyz2mol import get_atomicNumList, xyz2mol
 
@@ -79,34 +80,48 @@ def map_atom_info(df):
     return df
 
 
-def reduce_mem_usage(df, verbose=True):
-    numerics = ['int16', 'int32', 'int64', 'float16', 'float32', 'float64']
-    start_mem = df.memory_usage().sum() / 1024 ** 2
-    for col in df.columns:
-        col_type = df[col].dtypes
-        if col_type in numerics:
-            c_min = df[col].min()
-            c_max = df[col].max()
-            if str(col_type)[:3] == 'int':
-                if c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
-                    df[col] = df[col].astype(np.int8)
-                elif c_min > np.iinfo(np.int16).min and c_max < np.iinfo(np.int16).max:
-                    df[col] = df[col].astype(np.int16)
-                elif c_min > np.iinfo(np.int32).min and c_max < np.iinfo(np.int32).max:
-                    df[col] = df[col].astype(np.int32)
-                elif c_min > np.iinfo(np.int64).min and c_max < np.iinfo(np.int64).max:
-                    df[col] = df[col].astype(np.int64)
-            else:
-                c_prec = df[col].apply(lambda x: np.finfo(x).precision).max()
-                if c_min > np.finfo(np.float16).min and c_max < np.finfo(np.float16).max and c_prec == np.finfo(
-                        np.float16).precision:
-                    df[col] = df[col].astype(np.float16)
-                elif c_min > np.finfo(np.float32).min and c_max < np.finfo(np.float32).max and c_prec == np.finfo(
-                        np.float32).precision:
-                    df[col] = df[col].astype(np.float32)
-                else:
-                    df[col] = df[col].astype(np.float64)
-    end_mem = df.memory_usage().sum() / 1024 ** 2
-    if verbose: print('Mem. usage decreased to {:5.2f} Mb ({:.1f}% reduction)'.format(end_mem, 100 * (
-            start_mem - end_mem) / start_mem))
-    return df
+def search_neighbors(mol, atom_list):
+    '''
+    Find the path from the first atom to the secend atom,
+    and then add the 1-step-neighbors of this path.
+    '''
+    the_path_between_two_atom = [atom_list[0]]
+    depth = 0
+    # find the path between two atom
+    the_path_between_two_atom = each_atom_in_searching(
+        mol, atom_list[0], atom_list[1], depth, the_path_between_two_atom)
+    # add the neighbors of the atoms in the path
+    the_neighbors_of_the_path = copy.deepcopy(
+        the_path_between_two_atom)
+    for i in the_path_between_two_atom:
+        for j in range(mol.GetNumAtoms()):
+            e_ij = mol.GetBondBetweenAtoms(i, j)
+            # if edge is not none and j is not in the set, j is a new node
+            if (e_ij is not None) and (j not in the_neighbors_of_the_path):
+                the_neighbors_of_the_path.append(j)
+    return the_neighbors_of_the_path, the_path_between_two_atom
+
+
+def each_atom_in_searching(mol, atom, end_atom, depth, path):
+    if depth >= 3:
+        return path
+    neighbors_list_of_this_atom = []
+    for j in range(mol.GetNumAtoms()):
+        e_ij = mol.GetBondBetweenAtoms(atom, j)
+        # if edge is not none and j is not in the set, j is a new node
+        if (e_ij is not None) and (j not in path):
+            neighbors_list_of_this_atom.append(j)
+
+    if end_atom not in neighbors_list_of_this_atom:
+        depth += 1
+        for j in neighbors_list_of_this_atom:
+            # keep path
+            path_j = copy.deepcopy(path)
+            path_j.append(j)
+            path_j = each_atom_in_searching(
+                mol, j, end_atom, depth, path_j)
+            if path_j is not None and end_atom in path_j:
+                return path_j
+    else:
+        path.append(end_atom)
+        return path
