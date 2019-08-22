@@ -262,6 +262,50 @@ def do_valid(net, valid_loader, device):
     return valid_loss, log_mae, log_mae_mean
 
 
+def do_valid_Type(net, valid_loader, device, type):
+    net.eval()
+    valid_num = 0
+    valid_predict = []
+    valid_coupling_value = []
+
+    valid_loss = 0
+
+    for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in tqdm(enumerate(valid_loader)):
+        node = node.to(device)
+        edge = edge.to(device)
+        edge_index = edge_index.to(device)
+        node_index = node_index.to(device)
+        coupling_value = coupling_value.to(device)
+        coupling_index = coupling_index.to(device)
+
+        with torch.no_grad():
+            predict = net(node, edge, edge_index, node_index, coupling_index)
+            loss = criterion(predict, coupling_value)
+
+        batch_size = len(infor)
+
+        valid_predict.append(predict.data.cpu().numpy())
+
+        valid_coupling_value.append(coupling_value.data.cpu().numpy())
+
+        valid_loss += batch_size * loss.item()
+
+        valid_num += batch_size
+
+    assert (valid_num == len(valid_loader.dataset))
+
+    valid_loss = valid_loss / valid_num
+
+    predict = np.concatenate(valid_predict)
+    coupling_value = np.concatenate(valid_coupling_value)
+
+    diff = np.fabs(predict - coupling_value)
+
+    mae = diff.mean()
+
+    return valid_loss, np.log(mae + 1e-2)
+
+
 def do_train(net, train_loader, optimizer, device):
     net.train()
     optimizer.zero_grad()

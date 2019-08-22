@@ -1,5 +1,12 @@
 # PMP
 
+
+## 0822
+
+1. 分type训练
+2. 简单stacking 以及 特征stacking
+
+
 ## 0821
 
 1. 对齐fold

@@ -47,36 +47,36 @@ log.write(str(args) + '\n')
 
 
 def train_fold(fold):
-    df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
-    names = df_train['molecule_name'].unique()
+    # df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
+    # names = df_train['molecule_name'].unique()
 
-    # names = np.load('../input/champs-scalar-coupling/names.npy')
+    names = np.load('../input/champs-scalar-coupling/names.npy')
 
-    kfold = KFold(n_splits=5, random_state=42)
-    for k, (tr_idx, val_idx) in enumerate(kfold.split(names)):
-        # for k in range(5):
+    # kfold = KFold(n_splits=5, random_state=42)
+    # for k, (tr_idx, val_idx) in enumerate(kfold.split(names)):
+    for k in range(5):
         if k != fold:
             continue
         log.write(f'~~~~~~~~~~~~ fold {fold} ~~~~~~~~~~~~\n')
         best_score = 999
         best_epoch = 0
 
-        log.write(f'raw train:{len(tr_idx)} -- raw val:{len(val_idx)}\n')
-
-        tr_names = names[tr_idx]
-        val_names = names[val_idx]
-
-        log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
-
-        # val_names = names[k]
-        # tr_names = list(chain(*(names[:k].tolist() + names[k + 1:].tolist())))
+        # log.write(f'raw train:{len(tr_idx)} -- raw val:{len(val_idx)}\n')
         #
-        # print(len(val_names))
+        # tr_names = names[tr_idx]
+        # val_names = names[val_idx]
+        #
+        # log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
+
+        val_names = names[k]
+        tr_names = list(chain(*(names[:k].tolist() + names[k + 1:].tolist())))
+
+        print(len(val_names))
 
         train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=8,
                                   pin_memory=False,
                                   shuffle=True)
-        val_loader = DataLoader(PMPDataset(val_names), batch_size=48, collate_fn=null_collate, num_workers=8,
+        val_loader = DataLoader(PMPDataset(val_names), batch_size=128, collate_fn=null_collate, num_workers=8,
                                 pin_memory=False,
                                 )
 

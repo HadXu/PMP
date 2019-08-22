@@ -19,16 +19,6 @@ import torch
 import numpy as np
 from nn_utils import Graph, Coupling
 
-from dscribe.descriptors import ACSF
-from dscribe.core.system import System
-
-ACSF_GENERATOR = ACSF(
-    species=['H', 'C', 'N', 'O', 'F'],
-    rcut=6.0,
-    g2_params=[[1, 1], [1, 2], [1, 3]],
-    g4_params=[[1, 1, 1], [1, 2, 1], [1, 1, -1], [1, 2, -1]],
-)
-
 
 def null_collate(batch):
     batch_size = len(batch)
@@ -128,7 +118,42 @@ class PMPDataset(Dataset):
         g.node += [g.axyz[1], c]
 
         g.node = np.concatenate(g.node, -1)
+        g.edge = np.concatenate(g.edge, -1)
 
+        return g
+
+    def __len__(self):
+        return len(self.names)
+
+
+class PMPDatasetType(Dataset):
+    def __init__(self, names, type='1JHC'):
+        self.path = Path('../input/graph0821')
+        self.names = names
+        self.type = COUPLING_TYPE.index(type)
+
+    def __getitem__(self, x):
+        # molecule_name, smiles, axyz(atom, xyz), node, edge, edge_index
+
+        name = self.names[x]
+        with open(self.path / f'{name}.pickle', 'rb') as f:
+            g = pickle.load(f)
+
+        assert isinstance(g, Graph)
+        assert (g.molecule_name == name)
+
+        c = charge.get(f'{name}.xyz')
+
+        g.node += [g.axyz[1], c]
+
+        index = np.where(g.coupling.type == self.type)[0]
+        g.coupling.id = g.coupling.id[index]
+        g.coupling.type = g.coupling.type[index]
+        g.coupling.type = [0] * len(g.coupling.type)
+        g.coupling.index = g.coupling.index[index]
+        g.coupling.value = g.coupling.value[index]
+
+        g.node = np.concatenate(g.node, -1)
         g.edge = np.concatenate(g.edge, -1)
 
         return g
@@ -143,7 +168,10 @@ if __name__ == '__main__':
     # df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
     # names = df_train['molecule_name'].unique()
 
-    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
+    # train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
+
+    train_loader = DataLoader(PMPDatasetType(names, type='1JHC'), batch_size=4, collate_fn=null_collate)
+
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(
             train_loader):
         print(node.size())

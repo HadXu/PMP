@@ -112,7 +112,7 @@ def get_cv_score():
         net.load_state_dict(
             torch.load(f'../checkpoint/fold{k}_model_0817-fine.pth', map_location=lambda storage, loc: storage))
 
-        loader = DataLoader(PMPDataset(names[val_idx]), batch_size=48, collate_fn=null_collate, num_workers=8,
+        loader = DataLoader(PMPDataset(names[val_idx]), batch_size=128, collate_fn=null_collate, num_workers=8,
                             pin_memory=False)
         _, log_mae, log_mae_mean = do_valid(net, loader, device)
         cv_score.append(log_mae_mean)
