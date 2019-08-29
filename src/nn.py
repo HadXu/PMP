@@ -5,12 +5,13 @@ from torch.utils.data import DataLoader
 from model import Net
 from nn_utils import do_train, do_valid, time_to_str, Graph, Coupling, Logger, adjust_learning_rate
 from Nadam import Nadam
-from sklearn.model_selection import KFold
 from timeit import default_timer as timer
 from nn_data import PMPDataset, null_collate
 from argparse import ArgumentParser
 import random
 from itertools import chain
+from tqdm import tqdm
+import pickle
 
 parser = ArgumentParser(description='train PMP')
 
@@ -46,32 +47,37 @@ log.open(f'{name}_fold{fold}.txt')
 log.write(str(args) + '\n')
 
 
-def train_fold(fold):
-    # df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
-    # names = df_train['molecule_name'].unique()
+def select(names):
+    res = []
 
+    for x in tqdm(names):
+        with open(f'../input/graph0821/{x}.pickle', 'rb') as f:
+            g = pickle.load(f)
+            assert isinstance(g, Graph)
+
+            if len(g.axyz[1]) < 15:
+                res.append(x)
+    return res
+
+
+def train_fold(fold):
     names = np.load('../input/champs-scalar-coupling/names.npy')
 
-    # kfold = KFold(n_splits=5, random_state=42)
-    # for k, (tr_idx, val_idx) in enumerate(kfold.split(names)):
     for k in range(5):
         if k != fold:
             continue
         log.write(f'~~~~~~~~~~~~ fold {fold} ~~~~~~~~~~~~\n')
         best_score = 999
-        best_epoch = 0
-
-        # log.write(f'raw train:{len(tr_idx)} -- raw val:{len(val_idx)}\n')
-        #
-        # tr_names = names[tr_idx]
-        # val_names = names[val_idx]
-        #
-        # log.write(f'train:{len(tr_names)} --- val:{len(val_names)}\n')
 
         val_names = names[k]
         tr_names = list(chain(*(names[:k].tolist() + names[k + 1:].tolist())))
 
-        print(len(val_names))
+        print(len(tr_names), len(val_names))
+
+        val_names = select(val_names)
+        tr_names = select(tr_names)
+
+        print(len(tr_names), len(val_names))
 
         train_loader = DataLoader(PMPDataset(tr_names), batch_size=bs, collate_fn=null_collate, num_workers=8,
                                   pin_memory=False,

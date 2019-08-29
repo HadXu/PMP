@@ -56,6 +56,7 @@ def null_collate(batch):
         coupling_value.append(graph.coupling.value)
 
         coupling_atom_index.append(graph.coupling.index[:, :2] + offset)
+
         coupling_edge_index.append(graph.coupling.index[:, 2] + edge_offset)
 
         coupling_type_index.append(graph.coupling.type)
@@ -75,7 +76,7 @@ def null_collate(batch):
         np.concatenate(coupling_atom_index),
         np.concatenate(coupling_type_index).reshape(-1, 1),
         np.concatenate(coupling_batch_index).reshape(-1, 1),
-        np.concatenate(coupling_edge_index).reshape(-1, 1),
+        np.concatenate(coupling_edge_index).reshape(-1, 1)
     ], -1)
 
     coupling_index = torch.from_numpy(coupling_index).long()
@@ -96,12 +97,9 @@ with open('../input/champs-scalar-coupling/charge.pkl', 'rb') as f:
 
 
 class PMPDataset(Dataset):
-    def __init__(self, names, type='1JHC', is_seven=False):
+    def __init__(self, names):
         self.path = Path('../input/graph0821')
-        if is_seven:
-            self.path = Path('/opt/ml/disk/PMP/input/graph_old')
         self.names = names
-        self.type = COUPLING_TYPE.index(type)
 
     def __getitem__(self, x):
         # molecule_name, smiles, axyz(atom, xyz), node, edge, edge_index
@@ -112,9 +110,7 @@ class PMPDataset(Dataset):
 
         assert isinstance(g, Graph)
         assert (g.molecule_name == name)
-
         c = charge.get(f'{name}.xyz')
-
         g.node += [g.axyz[1], c]
 
         g.node = np.concatenate(g.node, -1)
@@ -168,9 +164,9 @@ if __name__ == '__main__':
     # df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
     # names = df_train['molecule_name'].unique()
 
-    # train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
+    train_loader = DataLoader(PMPDataset(names), batch_size=1, collate_fn=null_collate)
 
-    train_loader = DataLoader(PMPDatasetType(names, type='1JHC'), batch_size=4, collate_fn=null_collate)
+    # train_loader = DataLoader(PMPDatasetType(names, type='1JHC'), batch_size=4, collate_fn=null_collate)
 
     for b, (node, edge, edge_index, node_index, coupling_value, coupling_index, infor) in enumerate(
             train_loader):

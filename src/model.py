@@ -32,7 +32,7 @@ class NodeEmbModule(nn.Module):
     def __init__(self, hidden):
         super(NodeEmbModule, self).__init__()
         self.fc1 = nn.Sequential(
-            LinearBn(97, hidden),
+            LinearBn(113, hidden),
             nn.ReLU(inplace=True),
         )
         self.fc2 = nn.Sequential(
@@ -248,9 +248,9 @@ class Net(torch.nn.Module):
         self.encoder2 = GCN(128, 128, dropout=0.1)
         self.encoder3 = GCN(128, 128, dropout=0.1)
 
-        self.decoder = Set2Set(self.hidden_dim, processing_step=4)
+        # self.decoder = Set2Set(self.hidden_dim, processing_step=4)
 
-        # self.decoder = SAGPool(self.hidden_dim)
+        self.decoder = SAGPool(self.hidden_dim)
 
         self.predict = nn.Sequential(
             LinearBn(6 * self.hidden_dim, 1024),
@@ -260,16 +260,16 @@ class Net(torch.nn.Module):
             nn.Linear(512, 8),
         )
 
-        # self.node_se = nn.Sequential(
-        #     nn.Linear(self.hidden_dim * 4, self.hidden_dim),
-        #     nn.ReLU(inplace=True),
-        #     nn.Linear(self.hidden_dim, self.hidden_dim * 4),
-        #     nn.Sigmoid()
-        # )
-        # self.node_down = nn.Sequential(
-        #     LinearBn(self.hidden_dim * 4, self.hidden_dim),
-        #     nn.ReLU(inplace=True),
-        # )
+        self.node_se = nn.Sequential(
+            nn.Linear(self.hidden_dim * 4, self.hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.hidden_dim, self.hidden_dim * 4),
+            nn.Sigmoid()
+        )
+        self.node_down = nn.Sequential(
+            LinearBn(self.hidden_dim * 4, self.hidden_dim),
+            nn.ReLU(inplace=True),
+        )
 
     def forward(self, node, edge, edge_index, node_index, coupling_index):
         edge_index = edge_index.t().contiguous()
@@ -286,12 +286,9 @@ class Net(torch.nn.Module):
 
         node = self.encoder3(node, edge_index)
 
-        # node = torch.cat([node, node1, node2, node3], dim=-1)
-        # node = self.node_down(self.node_se(node) * node)
+        pool = self.decoder(node, edge_index, edge, node_index)  # sagpool
 
-        # pool = self.decoder(node, edge_index, edge, node_index)  # sagpool
-
-        pool = self.decoder(node, node_index)  # set2set
+        # pool = self.decoder(node, node_index)  # set2set
 
         pool = torch.index_select(pool, dim=0, index=coupling_batch_index.view(-1))  # 16,256
         node0 = torch.index_select(node, dim=0, index=coupling_atom0_index.view(-1))  # 16,128

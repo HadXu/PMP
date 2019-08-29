@@ -17,6 +17,7 @@ import os
 import numpy as np
 import torch
 from tqdm import tqdm
+import pandas as pd
 
 
 class Logger(object):
@@ -123,7 +124,7 @@ def compute_kaggle_metric(predict, coupling_value, coupling_type, num_type=8):
         index = np.where(coupling_type == t)[0]
         if len(index) > 0:
             m = diff[index].mean()
-            log_m = np.log(m + 1e-2)
+            log_m = np.log(m)
             mae[t] = m
             log_mae[t] = log_m
         else:
@@ -235,7 +236,6 @@ def do_valid(net, valid_loader, device):
             loss = criterion(predict, coupling_value)
 
         batch_size = len(infor)
-
         valid_predict.append(predict.data.cpu().numpy())
 
         valid_coupling_type.append(coupling_index[:, 2].data.cpu().numpy())
@@ -251,15 +251,28 @@ def do_valid(net, valid_loader, device):
 
     # compute
     predict = np.concatenate(valid_predict)
-
     coupling_value = np.concatenate(valid_coupling_value)
     coupling_type = np.concatenate(valid_coupling_type).astype(np.int32)
+
+    assert len(predict) == len(coupling_type) == len(coupling_value)
 
     mae, log_mae = compute_kaggle_metric(predict, coupling_value, coupling_type, 8)
 
     log_mae_mean = sum(log_mae) / 8
 
     return valid_loss, log_mae, log_mae_mean
+
+
+norm = {
+    '1JHC': [94.976153, 18.277236880290022],
+    '2JHH': [-10.286605, 3.979607163730381],
+    '1JHN': [47.479884, 10.922171556272295],
+    '2JHN': [3.124754, 3.6734741723096236],
+    '2JHC': [-0.270624, 4.523610750196486],
+    '3JHH': [4.771023, 3.704984434128579],
+    '3JHC': [3.688470, 3.0709074866562176],
+    '3JHN': [0.990730, 1.315393353533751],
+}
 
 
 def do_valid_Type(net, valid_loader, device, type):
@@ -280,6 +293,9 @@ def do_valid_Type(net, valid_loader, device, type):
 
         with torch.no_grad():
             predict = net(node, edge, edge_index, node_index, coupling_index)
+            if type:
+                predict = predict * norm[type][1] + norm[type][0]
+
             loss = criterion(predict, coupling_value)
 
         batch_size = len(infor)
@@ -303,10 +319,10 @@ def do_valid_Type(net, valid_loader, device, type):
 
     mae = diff.mean()
 
-    return valid_loss, np.log(mae + 1e-2)
+    return valid_loss, np.log(mae)
 
 
-def do_train(net, train_loader, optimizer, device):
+def do_train(net, train_loader, optimizer, device, type=None):
     net.train()
     optimizer.zero_grad()
     losses = []
@@ -317,6 +333,9 @@ def do_train(net, train_loader, optimizer, device):
         node_index = node_index.to(device)
         coupling_value = coupling_value.to(device)
         coupling_index = coupling_index.to(device)
+
+        if type:
+            coupling_value = (coupling_value - norm[type][0]) / norm[type][1]
 
         predict = net(node, edge, edge_index, node_index, coupling_index)
         loss = criterion(predict, coupling_value)

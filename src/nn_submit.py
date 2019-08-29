@@ -22,7 +22,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 
-device = torch.device('cuda:1')
+device = torch.device('cuda:6')
 
 SEED = 42
 random.seed(SEED)
@@ -30,7 +30,7 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 
-def submit_fold(names, net):
+def submit_fold(names, net, device=device):
     loader = DataLoader(PMPDataset(names), batch_size=128, collate_fn=null_collate, num_workers=8, pin_memory=True)
     net.eval()
     test_num = 0
@@ -99,20 +99,18 @@ def submit_one_fold():
 
 
 def get_cv_score():
-    df_train = pd.read_csv('../input/champs-scalar-coupling/train.csv', usecols=['molecule_name'])
-    names = df_train['molecule_name'].unique()
+    names = np.load('../input/champs-scalar-coupling/names.npy')
 
-    kfold = KFold(n_splits=5, random_state=42)
     net = Net().to(device)
     cv_score = []
     print('1JHC,   2JHC,   3JHC,   1JHN,   2JHN,   3JHN,   2JHH,   3JHH')
-    for k, (tr_idx, val_idx) in enumerate(kfold.split(names)):
+    for k in range(5):
         # if k != 0:
         #     continue
         net.load_state_dict(
-            torch.load(f'../checkpoint/fold{k}_model_0817-fine.pth', map_location=lambda storage, loc: storage))
+            torch.load(f'../checkpoint/fold{k}_model_0823.pth', map_location=lambda storage, loc: storage))
 
-        loader = DataLoader(PMPDataset(names[val_idx]), batch_size=128, collate_fn=null_collate, num_workers=8,
+        loader = DataLoader(PMPDataset(names[k]), batch_size=128, collate_fn=null_collate, num_workers=8,
                             pin_memory=False)
         _, log_mae, log_mae_mean = do_valid(net, loader, device)
         cv_score.append(log_mae_mean)
